@@ -11,4 +11,6 @@ dashboard/.env.local
 
 # General
 .DS_Store
-*.pyc
+*.pycgit push origin main
+.vercel
+.env*

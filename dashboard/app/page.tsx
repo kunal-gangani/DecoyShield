@@ -1,18 +1,17 @@
 'use client'
 
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { getEvents, getStats } from '../lib/api'
-import { Shield, AlertTriangle, Globe, Activity, Terminal, MapPin, Wifi, Zap, Eye, Lock } from 'lucide-react'
 
 interface Event {
   id: string
-  honeypot_type: string
   ip: string
   country: string
   city: string
   isp: string
-  risk_score: number
+  honeypot_type: string
   event_type: string
+  risk_score: number
   commands: string[]
   ai_summary: string
   created_at: string
@@ -24,367 +23,397 @@ interface Stats {
   unique_countries: string[]
 }
 
+interface Orb {
+  event: Event
+  x: number
+  y: number
+  vx: number
+  vy: number
+  r: number
+  pulse: number
+  pulseSpeed: number
+}
+
 function getRisk(score: number) {
-  if (score >= 90) return { label: 'CRITICAL', color: '#ff4d6d', glow: '#ff4d6d', dim: '#ff4d6d12' }
-  if (score >= 70) return { label: 'HIGH', color: '#ff6b35', glow: '#ff6b35', dim: '#ff6b3512' }
-  if (score >= 40) return { label: 'MEDIUM', color: '#ffd60a', glow: '#ffd60a', dim: '#ffd60a12' }
-  return { label: 'LOW', color: '#06ffa5', glow: '#06ffa5', dim: '#06ffa512' }
+  if (score >= 90) return { label: 'CRITICAL', color: '#ff4d6d', glow: '255,77,109' }
+  if (score >= 70) return { label: 'HIGH', color: '#ff6b35', glow: '255,107,53' }
+  if (score >= 40) return { label: 'MEDIUM', color: '#ffd60a', glow: '255,214,10' }
+  return { label: 'LOW', color: '#06ffa5', glow: '6,255,165' }
 }
 
-function timeAgo(dateStr: string) {
-  const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000)
-  if (diff < 60) return `${diff}s ago`
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
-  return `${Math.floor(diff / 86400)}d ago`
-}
-
-function AnimatedNumber({ value, color }: { value: number; color: string }) {
-  const [display, setDisplay] = useState(0)
-  useEffect(() => {
-    let start = 0
-    const step = Math.max(1, Math.ceil(value / 40))
-    const timer = setInterval(() => {
-      start += step
-      if (start >= value) { setDisplay(value); clearInterval(timer) }
-      else setDisplay(start)
-    }, 20)
-    return () => clearInterval(timer)
-  }, [value])
-  return <span style={{ color }}>{display}</span>
+function timeAgo(d: string) {
+  const s = Math.floor((Date.now() - new Date(d).getTime()) / 1000)
+  if (s < 60) return `${s}s ago`
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`
+  return `${Math.floor(s / 3600)}h ago`
 }
 
 export default function Dashboard() {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const hbCanvasRef = useRef<HTMLCanvasElement>(null)
+  const orbsRef = useRef<Orb[]>([])
+  const selectedOrbRef = useRef<Orb | null>(null)
+  const hexPulseRef = useRef(0)
+  const hbPointsRef = useRef<number[]>(Array(60).fill(0.1))
+  const animRef = useRef<number>(0)
+  const centerRef = useRef<HTMLDivElement>(null)
+
   const [events, setEvents] = useState<Event[]>([])
   const [stats, setStats] = useState<Stats | null>(null)
   const [selected, setSelected] = useState<Event | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [newIds, setNewIds] = useState<Set<string>>(new Set())
-  const prevIds = useRef<Set<string>>(new Set())
-  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [, forceUpdate] = useState(0)
+
+  function initOrbs(evts: Event[], W: number, H: number) {
+    const cx = W / 2, cy = H / 2
+    orbsRef.current = evts.map((e, i) => {
+      const angle = (i / evts.length) * Math.PI * 2 - Math.PI / 2
+      const dist = 90 + Math.random() * 70
+      return {
+        event: e,
+        x: cx + Math.cos(angle) * dist,
+        y: cy + Math.sin(angle) * dist,
+        vx: (Math.random() - 0.5) * 0.2,
+        vy: (Math.random() - 0.5) * 0.2,
+        r: 8 + e.risk_score / 10,
+        pulse: Math.random() * Math.PI * 2,
+        pulseSpeed: 0.02 + Math.random() * 0.02,
+      }
+    })
+  }
+
+  function drawHexGrid(ctx: CanvasRenderingContext2D, W: number, H: number) {
+    const size = 28, h = size * Math.sqrt(3)
+    ctx.strokeStyle = 'rgba(124,58,237,0.06)'
+    ctx.lineWidth = 0.5
+    for (let row = -1; row < H / h + 2; row++) {
+      for (let col = -1; col < W / (size * 1.5) + 2; col++) {
+        const x = col * size * 1.5
+        const y = row * h + (col % 2 === 0 ? 0 : h / 2)
+        ctx.beginPath()
+        for (let i = 0; i < 6; i++) {
+          const a = (Math.PI / 180) * (60 * i - 30)
+          const px = x + size * Math.cos(a)
+          const py = y + size * Math.sin(a)
+          i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py)
+        }
+        ctx.closePath()
+        ctx.stroke()
+      }
+    }
+  }
+
+  function drawCenter(ctx: CanvasRenderingContext2D, W: number, H: number) {
+    const cx = W / 2, cy = H / 2
+    const pulse = Math.sin(hexPulseRef.current) * 0.3 + 0.7
+    for (let i = 3; i >= 1; i--) {
+      ctx.beginPath()
+      ctx.arc(cx, cy, 20 * i * pulse, 0, Math.PI * 2)
+      ctx.strokeStyle = `rgba(124,58,237,${0.15 / i})`
+      ctx.lineWidth = 0.5
+      ctx.stroke()
+    }
+    const pts = 6, r = 14
+    ctx.beginPath()
+    for (let i = 0; i < pts; i++) {
+      const a = ((Math.PI * 2) / pts) * i - Math.PI / 2
+      const px = cx + r * Math.cos(a), py = cy + r * Math.sin(a)
+      i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py)
+    }
+    ctx.closePath()
+    ctx.fillStyle = 'rgba(124,58,237,0.15)'
+    ctx.fill()
+    ctx.strokeStyle = '#7c3aed'
+    ctx.lineWidth = 1
+    ctx.stroke()
+    ctx.beginPath()
+    ctx.arc(cx, cy, 4, 0, Math.PI * 2)
+    ctx.fillStyle = '#a855f7'
+    ctx.fill()
+    ctx.font = '9px monospace'
+    ctx.fillStyle = 'rgba(200,184,255,0.4)'
+    ctx.textAlign = 'center'
+    ctx.fillText('YOU', cx, cy + 22)
+  }
+
+  function drawOrbs(ctx: CanvasRenderingContext2D, W: number, H: number) {
+    orbsRef.current.forEach(o => {
+      o.x += o.vx; o.y += o.vy
+      if (o.x < o.r || o.x > W - o.r) o.vx *= -1
+      if (o.y < o.r || o.y > H - o.r) o.vy *= -1
+      o.pulse += o.pulseSpeed
+      const risk = getRisk(o.event.risk_score)
+      const pulseR = o.r + Math.sin(o.pulse) * 2
+      const isSelected = selectedOrbRef.current?.event.id === o.event.id
+
+      ctx.beginPath()
+      ctx.arc(o.x, o.y, pulseR * 2.5, 0, Math.PI * 2)
+      ctx.fillStyle = `rgba(${risk.glow},${isSelected ? 0.12 : 0.05})`
+      ctx.fill()
+
+      ctx.beginPath()
+      ctx.arc(o.x, o.y, pulseR, 0, Math.PI * 2)
+      ctx.fillStyle = `rgba(${risk.glow},0.25)`
+      ctx.fill()
+
+      ctx.beginPath()
+      ctx.arc(o.x, o.y, pulseR * 0.5, 0, Math.PI * 2)
+      ctx.fillStyle = risk.color
+      ctx.fill()
+
+      if (isSelected) {
+        ctx.beginPath()
+        ctx.arc(o.x, o.y, pulseR + 6, 0, Math.PI * 2)
+        ctx.strokeStyle = risk.color
+        ctx.lineWidth = 1
+        ctx.setLineDash([4, 4])
+        ctx.stroke()
+        ctx.setLineDash([])
+      }
+
+      ctx.beginPath()
+      ctx.moveTo(W / 2, H / 2)
+      ctx.lineTo(o.x, o.y)
+      ctx.strokeStyle = `rgba(${risk.glow},${isSelected ? 0.15 : 0.04})`
+      ctx.lineWidth = 0.5
+      ctx.setLineDash([3, 6])
+      ctx.stroke()
+      ctx.setLineDash([])
+
+      ctx.font = '9px monospace'
+      ctx.fillStyle = `rgba(${risk.glow},0.7)`
+      ctx.textAlign = 'center'
+      ctx.fillText(o.event.ip, o.x, o.y + pulseR + 12)
+    })
+  }
+
+  function drawHeartbeat() {
+    const canvas = hbCanvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    ctx.beginPath()
+    hbPointsRef.current.forEach((v, i) => {
+      const x = (i / 59) * canvas.width
+      const y = canvas.height - v * canvas.height * 0.85 - 2
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)
+    })
+    ctx.strokeStyle = '#7c3aed'
+    ctx.lineWidth = 1
+    ctx.stroke()
+  }
 
   useEffect(() => {
     async function load() {
       const [eventsData, statsData] = await Promise.all([getEvents(), getStats()])
-      const incoming: Event[] = eventsData
-      const fresh = new Set(incoming.filter(e => !prevIds.current.has(e.id)).map(e => e.id))
-      if (fresh.size > 0) { setNewIds(fresh); setTimeout(() => setNewIds(new Set()), 2500) }
-      prevIds.current = new Set(incoming.map(e => e.id))
-      setEvents(incoming)
+      setEvents(eventsData)
       setStats(statsData)
-      setLoading(false)
+      const canvas = canvasRef.current
+      if (canvas) initOrbs(eventsData, canvas.width, canvas.height)
     }
     load()
     const iv = setInterval(load, 15000)
     return () => clearInterval(iv)
   }, [])
 
-  // Animated background canvas
+  useEffect(() => {
+    const hbTick = setInterval(() => {
+      const latest = events[0]
+      const spike = latest ? latest.risk_score / 100 : 0
+      hbPointsRef.current.push(spike > 0.3 ? spike : 0.1 + Math.random() * 0.08)
+      if (hbPointsRef.current.length > 60) hbPointsRef.current.shift()
+      drawHeartbeat()
+    }, 800)
+    return () => clearInterval(hbTick)
+  }, [events])
+
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
-    canvas.width = window.innerWidth
-    canvas.height = window.innerHeight
 
-    const particles: { x: number; y: number; vx: number; vy: number; r: number; a: number }[] = []
-    for (let i = 0; i < 60; i++) {
-      particles.push({
-        x: Math.random() * canvas.width,
-        y: Math.random() * canvas.height,
-        vx: (Math.random() - 0.5) * 0.3,
-        vy: (Math.random() - 0.5) * 0.3,
-        r: Math.random() * 1.5 + 0.5,
-        a: Math.random()
-      })
+    function resize() {
+      const el = centerRef.current
+      if (!el || !canvas) return
+      const r = el.getBoundingClientRect()
+      canvas.width = r.width
+      canvas.height = r.height
+      initOrbs(orbsRef.current.map(o => o.event), r.width, r.height)
     }
+    resize()
+    window.addEventListener('resize', resize)
 
-    let animId: number
-    function draw() {
-      if (!ctx || !canvas) return
-      ctx.clearRect(0, 0, canvas.width, canvas.height)
-      particles.forEach(p => {
-        p.x += p.vx; p.y += p.vy
-        if (p.x < 0 || p.x > canvas.width) p.vx *= -1
-        if (p.y < 0 || p.y > canvas.height) p.vy *= -1
-        ctx.beginPath()
-        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2)
-        ctx.fillStyle = `rgba(139, 92, 246, ${p.a * 0.4})`
-        ctx.fill()
-      })
-      // Connect nearby particles
-      for (let i = 0; i < particles.length; i++) {
-        for (let j = i + 1; j < particles.length; j++) {
-          const dx = particles[i].x - particles[j].x
-          const dy = particles[i].y - particles[j].y
-          const dist = Math.sqrt(dx * dx + dy * dy)
-          if (dist < 100) {
-            ctx.beginPath()
-            ctx.moveTo(particles[i].x, particles[i].y)
-            ctx.lineTo(particles[j].x, particles[j].y)
-            ctx.strokeStyle = `rgba(139, 92, 246, ${(1 - dist / 100) * 0.15})`
-            ctx.lineWidth = 0.5
-            ctx.stroke()
-          }
-        }
-      }
-      animId = requestAnimationFrame(draw)
+    function animate() {
+      if (!ctx) return
+      const W = canvas!.width, H = canvas!.height
+      ctx.clearRect(0, 0, W, H)
+      drawHexGrid(ctx, W, H)
+      drawCenter(ctx, W, H)
+      drawOrbs(ctx, W, H)
+      hexPulseRef.current += 0.015
+      animRef.current = requestAnimationFrame(animate)
     }
-    draw()
-    return () => cancelAnimationFrame(animId)
+    animate()
+
+    return () => {
+      cancelAnimationFrame(animRef.current)
+      window.removeEventListener('resize', resize)
+    }
   }, [])
+
+  function handleCenterClick(e: React.MouseEvent<HTMLDivElement>) {
+    const rect = e.currentTarget.getBoundingClientRect()
+    const mx = e.clientX - rect.left
+    const my = e.clientY - rect.top
+    let hit: Orb | null = null as Orb | null
+    orbsRef.current.forEach(o => {
+      const dx = o.x - mx, dy = o.y - my
+      if (Math.sqrt(dx * dx + dy * dy) < o.r * 3) hit = o
+    })
+    selectedOrbRef.current = hit
+    setSelected(hit ? (hit as Orb).event : null)
+    forceUpdate(n => n + 1)
+  }
+
+  const risk = selected ? getRisk(selected.risk_score) : null
 
   return (
     <>
       <style>{`
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { background: #050817; }
-        @keyframes fadeUp { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:translateY(0); } }
-        @keyframes slideRight { from { opacity:0; transform:translateX(-16px); } to { opacity:1; transform:translateX(0); } }
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
-        @keyframes ping { 0%{transform:scale(1);opacity:1} 100%{transform:scale(2.5);opacity:0} }
-        @keyframes glow { 0%,100%{box-shadow:0 0 20px #7c3aed40} 50%{box-shadow:0 0 40px #7c3aed80} }
-        @keyframes borderFlow {
-          0%{background-position:0% 50%}
-          50%{background-position:100% 50%}
-          100%{background-position:0% 50%}
-        }
-        ::-webkit-scrollbar { width: 4px; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #03040a; overflow: hidden; }
+        @keyframes fadeIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+        ::-webkit-scrollbar { width: 3px; }
         ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #7c3aed40; border-radius: 4px; }
-        .ecard { transition: all 0.2s ease; }
-        .ecard:hover { transform: translateX(4px); }
+        ::-webkit-scrollbar-thumb { background: #7c3aed30; border-radius: 3px; }
       `}</style>
 
-      <div style={{ minHeight: '100vh', background: '#050817', color: '#e2e8f0', fontFamily: 'Inter, sans-serif', position: 'relative', overflow: 'hidden' }}>
+      <div style={{ background: '#03040a', color: '#e2e8f0', fontFamily: 'monospace', height: '100vh', display: 'grid', gridTemplateColumns: '200px 1fr 260px', overflow: 'hidden' }}>
 
-        {/* Animated particle background */}
-        <canvas ref={canvasRef} style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none' }} />
+        {/* LEFT SIDEBAR */}
+        <div style={{ borderRight: '0.5px solid #ffffff08', padding: '16px 14px', display: 'flex', flexDirection: 'column', gap: '16px', background: '#03040a', zIndex: 10 }}>
 
-        {/* Purple orbs */}
-        <div style={{ position: 'fixed', top: '-200px', right: '-100px', width: '600px', height: '600px', background: 'radial-gradient(circle, #7c3aed18 0%, transparent 70%)', pointerEvents: 'none', zIndex: 0 }} />
-        <div style={{ position: 'fixed', bottom: '-200px', left: '-100px', width: '500px', height: '500px', background: 'radial-gradient(circle, #0ea5e918 0%, transparent 70%)', pointerEvents: 'none', zIndex: 0 }} />
-        <div style={{ position: 'fixed', top: '40%', left: '30%', width: '300px', height: '300px', background: 'radial-gradient(circle, #ff4d6d08 0%, transparent 70%)', pointerEvents: 'none', zIndex: 0 }} />
-
-        {/* Topbar */}
-        <nav style={{ position: 'relative', zIndex: 100, background: 'rgba(5,8,23,0.8)', backdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(124,58,237,0.2)', padding: '16px 32px', display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'linear-gradient(135deg, #7c3aed, #0ea5e9)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 20px #7c3aed60', animation: 'glow 3s infinite' }}>
-              <Shield size={18} color="#fff" />
-            </div>
+          {/* Logo */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', paddingBottom: '14px', borderBottom: '0.5px solid #ffffff08' }}>
+            <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
+              <polygon points="18,2 32,10 32,26 18,34 4,26 4,10" fill="#1a0a2e" stroke="#7c3aed" strokeWidth="1" />
+              <polygon points="18,7 28,13 28,23 18,29 8,23 8,13" fill="none" stroke="#a855f7" strokeWidth="0.5" opacity="0.5" />
+              <path d="M18 11 L22 15 L18 13 L14 15 Z" fill="#c8b8ff" />
+              <path d="M14 15 L18 13 L22 15 L22 21 L18 25 L14 21 Z" fill="none" stroke="#c8b8ff" strokeWidth="0.8" />
+              <circle cx="18" cy="18" r="2" fill="#7c3aed" />
+              <circle cx="18" cy="18" r="1" fill="#c8b8ff" />
+            </svg>
             <div>
-              <div style={{ fontWeight: 800, fontSize: '16px', background: 'linear-gradient(135deg, #a78bfa, #38bdf8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>DecoyShield</div>
-              <div style={{ fontSize: '10px', color: '#475569', letterSpacing: '1px' }}>CYBER DECEPTION PLATFORM</div>
+              <div style={{ fontSize: '13px', fontWeight: 500, color: '#c8b8ff', letterSpacing: '1px' }}>DECOYSHIELD</div>
+              <div style={{ fontSize: '9px', color: '#ffffff25', letterSpacing: '2px', marginTop: '2px' }}>PREDATOR VIEW</div>
             </div>
           </div>
 
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '32px' }}>
-            <div style={{ display: 'flex', gap: '24px' }}>
-              {[
-                { label: 'Total Events', value: stats?.total_events ?? 0, color: '#a78bfa' },
-                { label: 'High Risk', value: stats?.high_risk_events ?? 0, color: '#ff4d6d' },
-                { label: 'Countries', value: stats?.unique_countries?.length ?? 0, color: '#38bdf8' },
-              ].map(s => (
-                <div key={s.label} style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '22px', fontWeight: 900, lineHeight: 1 }}>
-                    <AnimatedNumber value={s.value} color={s.color} />
-                  </div>
-                  <div style={{ fontSize: '9px', color: '#334155', letterSpacing: '1.5px', marginTop: '2px' }}>{s.label.toUpperCase()}</div>
-                </div>
-              ))}
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(6,255,165,0.08)', border: '1px solid rgba(6,255,165,0.2)', borderRadius: '20px', padding: '6px 14px' }}>
-              <span style={{ position: 'relative', display: 'inline-flex', width: '8px', height: '8px' }}>
-                <span style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: '#06ffa5', animation: 'ping 1.5s infinite' }} />
-                <span style={{ position: 'relative', width: '8px', height: '8px', borderRadius: '50%', background: '#06ffa5', boxShadow: '0 0 8px #06ffa5' }} />
-              </span>
-              <span style={{ fontSize: '12px', fontWeight: 700, color: '#06ffa5', letterSpacing: '1px' }}>LIVE</span>
-            </div>
+          {/* Live pill */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#06ffa508', border: '0.5px solid #06ffa520', borderRadius: '20px', padding: '4px 10px', width: 'fit-content' }}>
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#06ffa5', display: 'inline-block', animation: 'blink 1.5s infinite' }} />
+            <span style={{ fontSize: '9px', color: '#06ffa5', letterSpacing: '1px' }}>LIVE</span>
           </div>
-        </nav>
 
-        <div style={{ position: 'relative', zIndex: 10, padding: '28px 32px', display: 'grid', gridTemplateColumns: '1fr 420px', gap: '24px', height: 'calc(100vh - 73px)' }}>
-
-          {/* Left — Attack Feed */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', overflow: 'hidden' }}>
-
-            {/* Section header */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <div style={{ width: '3px', height: '20px', background: 'linear-gradient(180deg, #7c3aed, #0ea5e9)', borderRadius: '2px' }} />
-                <span style={{ fontWeight: 700, fontSize: '14px', color: '#e2e8f0' }}>Live Attack Feed</span>
+          {/* Stats */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {[
+              { label: 'EVENTS', value: stats?.total_events ?? 0, color: '#c8b8ff' },
+              { label: 'HIGH RISK', value: stats?.high_risk_events ?? 0, color: '#ff4d6d' },
+              { label: 'NATIONS', value: stats?.unique_countries?.length ?? 0, color: '#38bdf8' },
+              { label: 'TRAPS', value: 3, color: '#4ade80' },
+            ].map(s => (
+              <div key={s.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                <span style={{ fontSize: '10px', color: '#ffffff25', letterSpacing: '1px' }}>{s.label}</span>
+                <span style={{ fontSize: '20px', fontWeight: 500, color: s.color }}>{s.value}</span>
               </div>
-              <div style={{ fontSize: '11px', color: '#334155', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)', padding: '4px 12px', borderRadius: '20px' }}>
-                auto-refresh 15s
-              </div>
-            </div>
+            ))}
+          </div>
 
-            {/* Event cards */}
-            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', paddingRight: '4px' }}>
-              {loading ? (
-                <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#334155', fontSize: '13px' }}>
-                  <span style={{ animation: 'pulse 1.5s infinite' }}>Initializing threat detection...</span>
-                </div>
-              ) : events.length === 0 ? (
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '12px', color: '#1e293b' }}>
-                  <Eye size={40} strokeWidth={1} />
-                  <span style={{ fontSize: '13px' }}>Honeypots deployed. Waiting for attackers...</span>
-                </div>
-              ) : events.map((event, idx) => {
-                const risk = getRisk(event.risk_score)
-                const isSelected = selected?.id === event.id
-                const isNew = newIds.has(event.id)
+          {/* Heartbeat */}
+          <div>
+            <div style={{ fontSize: '9px', color: '#ffffff20', letterSpacing: '2px', marginBottom: '6px' }}>HEARTBEAT</div>
+            <canvas ref={hbCanvasRef} width={172} height={36} style={{ width: '100%', height: '36px' }} />
+          </div>
+
+          {/* Feed */}
+          <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ fontSize: '9px', color: '#ffffff20', letterSpacing: '2px', marginBottom: '8px' }}>THREAT LOG</div>
+            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              {events.length === 0 ? (
+                <div style={{ color: '#ffffff15', fontSize: '10px', animation: 'blink 1.5s infinite' }}>awaiting contact...</div>
+              ) : events.map(e => {
+                const r = getRisk(e.risk_score)
                 return (
-                  <div
-                    key={event.id}
-                    className="ecard"
-                    onClick={() => setSelected(isSelected ? null : event)}
-                    style={{
-                      background: isSelected
-                        ? `linear-gradient(135deg, rgba(124,58,237,0.12), rgba(14,165,233,0.08))`
-                        : 'rgba(255,255,255,0.03)',
-                      backdropFilter: 'blur(12px)',
-                      border: `1px solid ${isSelected ? 'rgba(124,58,237,0.4)' : isNew ? risk.color + '50' : 'rgba(255,255,255,0.06)'}`,
-                      borderLeft: `3px solid ${risk.color}`,
-                      borderRadius: '14px',
-                      padding: '16px 18px',
-                      cursor: 'pointer',
-                      animation: isNew ? `slideRight 0.4s ease` : `fadeUp 0.3s ease ${idx * 0.03}s both`,
-                      boxShadow: isSelected ? `0 8px 32px rgba(124,58,237,0.15), inset 0 1px 0 rgba(255,255,255,0.05)` : isNew ? `0 0 24px ${risk.color}20` : '0 2px 8px rgba(0,0,0,0.2)',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '10px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: risk.color, boxShadow: `0 0 10px ${risk.color}`, flexShrink: 0, marginTop: '3px' }} />
-                        <div>
-                          <div style={{ fontFamily: 'monospace', fontSize: '14px', color: '#94a3b8', letterSpacing: '0.5px' }}>{event.ip}</div>
-                          <div style={{ fontSize: '12px', color: '#334155', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <MapPin size={10} />{event.country || 'Unknown'}{event.city ? ` · ${event.city}` : ''}
-                          </div>
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
-                        <span style={{ fontSize: '10px', fontWeight: 800, color: risk.color, background: risk.dim, border: `1px solid ${risk.color}40`, padding: '3px 10px', borderRadius: '20px', letterSpacing: '1px' }}>
-                          {risk.label}
-                        </span>
-                        <span style={{ fontSize: '10px', color: '#334155' }}>{timeAgo(event.created_at)}</span>
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <span style={{ fontSize: '13px', fontWeight: 600, color: '#cbd5e1', textTransform: 'capitalize' }}>
-                        {event.event_type.replace(/_/g, ' ')}
-                      </span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <div style={{ width: '80px', height: '4px', background: 'rgba(255,255,255,0.06)', borderRadius: '2px', overflow: 'hidden' }}>
-                          <div style={{ width: `${event.risk_score}%`, height: '100%', background: `linear-gradient(90deg, ${risk.color}80, ${risk.color})`, borderRadius: '2px', boxShadow: `0 0 8px ${risk.color}` }} />
-                        </div>
-                        <span style={{ fontSize: '11px', fontWeight: 700, color: risk.color, fontFamily: 'monospace' }}>{event.risk_score}</span>
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px', color: '#334155', background: 'rgba(255,255,255,0.04)', padding: '3px 8px', borderRadius: '6px' }}>
-                        <Terminal size={9} />{event.honeypot_type}
-                      </span>
-                      {event.commands?.length > 0 && (
-                        <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px', color: '#334155', background: 'rgba(255,255,255,0.04)', padding: '3px 8px', borderRadius: '6px' }}>
-                          <Zap size={9} />{event.commands.length} commands
-                        </span>
-                      )}
-                    </div>
+                  <div key={e.id} onClick={() => { const orb = orbsRef.current.find(o => o.event.id === e.id) || null; selectedOrbRef.current = orb; setSelected(e) }} style={{ paddingLeft: '8px', borderLeft: `2px solid ${r.color}`, cursor: 'pointer', padding: '5px 8px' }}>
+                    <div style={{ fontSize: '11px', color: r.color }}>{e.ip}</div>
+                    <div style={{ fontSize: '10px', color: '#ffffff30', marginTop: '1px' }}>{e.event_type.replace(/_/g, ' ')} · {timeAgo(e.created_at)}</div>
                   </div>
                 )
               })}
             </div>
           </div>
+        </div>
 
-          {/* Right — Detail Panel */}
-          <div style={{ background: 'rgba(255,255,255,0.02)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '20px', padding: '24px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '20px', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05)' }}>
+        {/* CENTER CANVAS */}
+        <div ref={centerRef} onClick={handleCenterClick} style={{ position: 'relative', cursor: 'crosshair', overflow: 'hidden' }}>
+          <canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} />
+          <div style={{ position: 'absolute', bottom: '16px', left: '50%', transform: 'translateX(-50%)', fontSize: '10px', color: '#ffffff15', letterSpacing: '2px', whiteSpace: 'nowrap', pointerEvents: 'none' }}>
+            CLICK AN ORB TO INVESTIGATE
+          </div>
+        </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <div style={{ width: '3px', height: '20px', background: 'linear-gradient(180deg, #7c3aed, #0ea5e9)', borderRadius: '2px' }} />
-              <span style={{ fontWeight: 700, fontSize: '14px' }}>Threat Intelligence</span>
-            </div>
-
-            {!selected ? (
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px', color: '#1e293b', padding: '40px 0' }}>
-                <div style={{ width: '64px', height: '64px', borderRadius: '20px', background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Lock size={28} strokeWidth={1} color="#7c3aed40" />
-                </div>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '13px', color: '#1e293b', marginBottom: '4px' }}>No threat selected</div>
-                  <div style={{ fontSize: '11px', color: '#0f172a' }}>Click an event to investigate</div>
+        {/* RIGHT DETAIL */}
+        <div style={{ borderLeft: '0.5px solid #ffffff08', padding: '16px 14px', background: '#03040acc', overflowY: 'auto', zIndex: 10 }}>
+          {!selected ? (
+            <div style={{ color: '#ffffff15', fontSize: '11px', textAlign: 'center', paddingTop: '60px', lineHeight: 2 }}>◎<br />select a<br />threat orb</div>
+          ) : (
+            <div style={{ animation: 'fadeIn 0.3s ease' }}>
+              <div style={{ marginBottom: '16px', paddingBottom: '12px', borderBottom: '0.5px solid #ffffff08' }}>
+                <div style={{ fontSize: '18px', color: '#c8b8ff', fontWeight: 500, marginBottom: '4px', wordBreak: 'break-all' }}>{selected.ip}</div>
+                <div style={{ fontSize: '11px', color: '#ffffff30', marginBottom: '10px' }}>{[selected.country, selected.city].filter(Boolean).join(' · ') || 'Unknown'}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: `rgba(${risk!.glow},0.08)`, border: `0.5px solid rgba(${risk!.glow},0.2)`, borderRadius: '20px', padding: '3px 10px', width: 'fit-content' }}>
+                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: risk!.color, display: 'inline-block' }} />
+                  <span style={{ fontSize: '9px', color: risk!.color, letterSpacing: '1px' }}>{risk!.label}</span>
                 </div>
               </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', animation: 'fadeUp 0.3s ease' }}>
 
-                {/* IP Hero */}
-                <div style={{ background: 'linear-gradient(135deg, rgba(124,58,237,0.15), rgba(14,165,233,0.08))', border: '1px solid rgba(124,58,237,0.2)', borderRadius: '14px', padding: '18px' }}>
-                  <div style={{ fontSize: '10px', color: '#475569', letterSpacing: '2px', marginBottom: '6px' }}>TARGET IP</div>
-                  <div style={{ fontFamily: 'monospace', fontSize: '22px', fontWeight: 800, background: 'linear-gradient(135deg, #a78bfa, #38bdf8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>{selected.ip}</div>
-                  <div style={{ fontSize: '12px', color: '#475569', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <MapPin size={11} />{[selected.country, selected.city].filter(Boolean).join(' · ') || 'Unknown location'}
-                  </div>
+              {[['ISP', selected.isp], ['HONEYPOT', selected.honeypot_type], ['EVENT', selected.event_type.replace(/_/g, ' ')], ['TIME', timeAgo(selected.created_at)]].map(([k, v]) => (
+                <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: '0.5px solid #ffffff06', fontSize: '11px' }}>
+                  <span style={{ color: '#ffffff25', letterSpacing: '1px' }}>{k}</span>
+                  <span style={{ color: '#94a3b8' }}>{v || '—'}</span>
                 </div>
+              ))}
 
-                {/* Info grid */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                  {[
-                    { icon: <Wifi size={12} />, label: 'ISP', value: selected.isp },
-                    { icon: <Terminal size={12} />, label: 'Honeypot', value: selected.honeypot_type },
-                    { icon: <Activity size={12} />, label: 'Event Type', value: selected.event_type.replace(/_/g, ' ') },
-                    { icon: <AlertTriangle size={12} />, label: 'Risk Score', value: `${selected.risk_score} / 100` },
-                  ].map(item => (
-                    <div key={item.label} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '10px', padding: '12px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#334155', fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '6px' }}>
-                        {item.icon}{item.label}
-                      </div>
-                      <div style={{ fontSize: '13px', fontWeight: 600, color: '#94a3b8', textTransform: 'capitalize', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.value || '—'}</div>
-                    </div>
+              <div style={{ margin: '14px 0' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', marginBottom: '5px' }}>
+                  <span style={{ color: '#ffffff25', letterSpacing: '1px' }}>THREAT LEVEL</span>
+                  <span style={{ color: risk!.color }}>{selected.risk_score}/100</span>
+                </div>
+                <div style={{ height: '4px', background: '#ffffff08', borderRadius: '2px', overflow: 'hidden' }}>
+                  <div style={{ width: `${selected.risk_score}%`, height: '100%', background: risk!.color, borderRadius: '2px', transition: 'width 0.8s ease' }} />
+                </div>
+              </div>
+
+              {selected.commands?.length > 0 && (
+                <div style={{ marginTop: '12px' }}>
+                  <div style={{ fontSize: '9px', color: '#ffffff20', letterSpacing: '2px', marginBottom: '6px' }}>INTERCEPTED</div>
+                  {selected.commands.map((c, i) => (
+                    <div key={i} style={{ fontSize: '11px', color: '#4ade80', marginBottom: '3px' }}>$ {c}</div>
                   ))}
                 </div>
+              )}
 
-                {/* Risk bar */}
-                <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '10px', padding: '14px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <span style={{ fontSize: '10px', color: '#334155', fontWeight: 700, letterSpacing: '1px' }}>THREAT LEVEL</span>
-                    <span style={{ fontSize: '12px', fontWeight: 800, color: getRisk(selected.risk_score).color }}>{getRisk(selected.risk_score).label}</span>
-                  </div>
-                  <div style={{ height: '6px', background: 'rgba(255,255,255,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
-                    <div style={{ width: `${selected.risk_score}%`, height: '100%', background: `linear-gradient(90deg, ${getRisk(selected.risk_score).color}60, ${getRisk(selected.risk_score).color})`, borderRadius: '3px', boxShadow: `0 0 12px ${getRisk(selected.risk_score).color}`, transition: 'width 0.8s ease' }} />
-                  </div>
+              {selected.ai_summary && (
+                <div style={{ marginTop: '14px', padding: '10px', border: '0.5px solid #ffffff08', borderRadius: '6px' }}>
+                  <div style={{ fontSize: '9px', color: '#ffffff20', letterSpacing: '2px', marginBottom: '6px' }}>AI ANALYSIS</div>
+                  <div style={{ fontSize: '11px', color: '#ffffff40', lineHeight: 1.8, whiteSpace: 'pre-line' }}>{selected.ai_summary}</div>
                 </div>
-
-                {/* Commands */}
-                {selected.commands?.length > 0 && (
-                  <div style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '10px', padding: '14px' }}>
-                    <div style={{ fontSize: '10px', color: '#334155', fontWeight: 700, letterSpacing: '1px', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <Terminal size={10} />COMMANDS INTERCEPTED
-                    </div>
-                    {selected.commands.map((cmd, i) => (
-                      <div key={i} style={{ fontFamily: 'monospace', fontSize: '12px', color: '#06ffa5', marginBottom: '6px', display: 'flex', gap: '8px', animation: `slideRight 0.3s ease ${i * 0.08}s both` }}>
-                        <span style={{ color: '#334155' }}>$</span>{cmd}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* AI Summary */}
-                {selected.ai_summary && (
-                  <div style={{ background: 'linear-gradient(135deg, rgba(124,58,237,0.08), rgba(14,165,233,0.05))', border: '1px solid rgba(124,58,237,0.2)', borderRadius: '10px', padding: '14px' }}>
-                    <div style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '1px', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <Zap size={10} color="#a78bfa" />
-                      <span style={{ color: '#334155' }}>AI ANALYSIS</span>
-                    </div>
-                    <div style={{ fontSize: '12px', color: '#64748b', lineHeight: 1.9, whiteSpace: 'pre-line' }}>{selected.ai_summary}</div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </>
