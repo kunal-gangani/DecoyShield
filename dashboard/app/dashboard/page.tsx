@@ -1,7 +1,22 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { getEvents, getStats } from '../../lib/api'
+
+interface Event {
+    id: string
+    ip: string
+    country: string
+    city: string
+    isp: string
+    honeypot_type: string
+    event_type: string
+    risk_score: number
+    commands: string[]
+    ai_summary: string
+    created_at: string
+}
 
 interface Stats {
     total_events: number
@@ -9,27 +24,102 @@ interface Stats {
     unique_countries: string[]
 }
 
-export default function DecoyShieldLanding() {
+interface Orb {
+    event: Event
+    x: number
+    y: number
+    vx: number
+    vy: number
+    r: number
+    pulse: number
+    pulseSpeed: number
+}
+
+function getRisk(score: number) {
+    if (score >= 90) return { label: 'CRITICAL', color: '#ff4d6d', glow: '255,77,109' }
+    if (score >= 70) return { label: 'HIGH', color: '#ff6b35', glow: '255,107,53' }
+    if (score >= 40) return { label: 'MEDIUM', color: '#ffd60a', glow: '255,214,10' }
+    return { label: 'LOW', color: '#06ffa5', glow: '6,255,165' }
+}
+
+function timeAgo(d: string) {
+    const s = Math.floor((Date.now() - new Date(d).getTime()) / 1000)
+    if (s < 60) return `${s}s ago`
+    if (s < 3600) return `${Math.floor(s / 60)}m ago`
+    return `${Math.floor(s / 3600)}h ago`
+}
+
+export default function Dashboard() {
     const canvasRef = useRef<HTMLCanvasElement>(null)
-    const mouseRef = useRef({ x: 0, y: 0 })
-    const [stats, setStats] = useState<Stats | null>(null)
-    const [mousePos, setMousePos] = useState({ x: 0, y: 0 })
+    const hbCanvasRef = useRef<HTMLCanvasElement>(null)
+    const orbsRef = useRef<Orb[]>([])
+    const selectedOrbRef = useRef<Orb | null>(null)
+    const hexPulseRef = useRef(0)
+    const hbPointsRef = useRef<number[]>(Array(60).fill(0.1))
     const animRef = useRef<number>(0)
+    const centerRef = useRef<HTMLDivElement>(null)
+    const mouseRef = useRef({ x: 0, y: 0 })
+
+    const [events, setEvents] = useState<Event[]>([])
+    const [stats, setStats] = useState<Stats | null>(null)
+    const [selected, setSelected] = useState<Event | null>(null)
+    const [, forceUpdate] = useState(0)
+    const router = useRouter()
+
+    function initOrbs(evts: Event[], W: number, H: number) {
+        const cx = W / 2, cy = H / 2
+        orbsRef.current = evts.map((e, i) => {
+            const angle = (i / Math.max(evts.length, 1)) * Math.PI * 2 - Math.PI / 2
+            const dist = 90 + Math.random() * 70
+            return {
+                event: e,
+                x: cx + Math.cos(angle) * dist,
+                y: cy + Math.sin(angle) * dist,
+                vx: (Math.random() - 0.5) * 0.2,
+                vy: (Math.random() - 0.5) * 0.2,
+                r: 8 + e.risk_score / 10,
+                pulse: Math.random() * Math.PI * 2,
+                pulseSpeed: 0.02 + Math.random() * 0.02,
+            }
+        })
+    }
 
     useEffect(() => {
-        getStats().then(setStats)
-        const iv = setInterval(() => getStats().then(setStats), 30000)
+        async function load() {
+            const [eventsData, statsData] = await Promise.all([getEvents(), getStats()])
+            setEvents(eventsData)
+            setStats(statsData)
+            const canvas = canvasRef.current
+            if (canvas) initOrbs(eventsData, canvas.width, canvas.height)
+        }
+        load()
+        const iv = setInterval(load, 15000)
         return () => clearInterval(iv)
     }, [])
 
     useEffect(() => {
-        const handleMouse = (e: MouseEvent) => {
-            mouseRef.current = { x: e.clientX, y: e.clientY }
-            setMousePos({ x: e.clientX, y: e.clientY })
-        }
-        window.addEventListener('mousemove', handleMouse)
-        return () => window.removeEventListener('mousemove', handleMouse)
-    }, [])
+        const hbTick = setInterval(() => {
+            const latest = events[0]
+            const spike = latest ? latest.risk_score / 100 : 0
+            hbPointsRef.current.push(spike > 0.3 ? spike : 0.1 + Math.random() * 0.08)
+            if (hbPointsRef.current.length > 60) hbPointsRef.current.shift()
+            const canvas = hbCanvasRef.current
+            if (!canvas) return
+            const ctx = canvas.getContext('2d')
+            if (!ctx) return
+            ctx.clearRect(0, 0, canvas.width, canvas.height)
+            ctx.beginPath()
+            hbPointsRef.current.forEach((v, i) => {
+                const x = (i / 59) * canvas.width
+                const y = canvas.height - v * canvas.height * 0.85 - 2
+                i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)
+            })
+            ctx.strokeStyle = '#7c3aed'
+            ctx.lineWidth = 1
+            ctx.stroke()
+        }, 800)
+        return () => clearInterval(hbTick)
+    }, [events])
 
     useEffect(() => {
         const canvas = canvasRef.current
@@ -37,612 +127,329 @@ export default function DecoyShieldLanding() {
         const ctx = canvas.getContext('2d')
         if (!ctx) return
 
-        canvas.width = window.innerWidth
-        canvas.height = window.innerHeight
-
-        const handleResize = () => {
-            if (!canvas) return
-            canvas.width = window.innerWidth
-            canvas.height = window.innerHeight
+        function resize() {
+            const el = centerRef.current
+            if (!el || !canvas) return
+            const r = el.getBoundingClientRect()
+            canvas.width = r.width
+            canvas.height = r.height
+            initOrbs(orbsRef.current.map(o => o.event), r.width, r.height)
         }
-        window.addEventListener('resize', handleResize)
-
-        const colors = ['#7c3aed', '#a855f7', '#ec4899', '#06ffa5', '#38bdf8']
-        const particles: { x: number; y: number; vx: number; vy: number; r: number; a: number; color: string }[] = []
-        for (let i = 0; i < 100; i++) {
-            particles.push({
-                x: Math.random() * canvas.width,
-                y: Math.random() * canvas.height,
-                vx: (Math.random() - 0.5) * 0.4,
-                vy: (Math.random() - 0.5) * 0.4,
-                r: Math.random() * 1.5 + 0.3,
-                a: Math.random() * 0.5 + 0.1,
-                color: colors[Math.floor(Math.random() * colors.length)],
-            })
-        }
-
-        const trail: { x: number; y: number; a: number }[] = []
+        resize()
+        window.addEventListener('resize', resize)
 
         function drawHexGrid() {
-            const W = canvas!.width, H = canvas!.height
-            const size = 32, h = size * Math.sqrt(3)
-            ctx!.strokeStyle = 'rgba(124,58,237,0.05)'
-            ctx!.lineWidth = 0.5
+            if (!canvas || !ctx) return
+            const W = canvas.width, H = canvas.height
+            const size = 28, h = size * Math.sqrt(3)
+            ctx.strokeStyle = 'rgba(124,58,237,0.06)'
+            ctx.lineWidth = 0.5
             for (let row = -1; row < H / h + 2; row++) {
                 for (let col = -1; col < W / (size * 1.5) + 2; col++) {
                     const x = col * size * 1.5
                     const y = row * h + (col % 2 === 0 ? 0 : h / 2)
-                    ctx!.beginPath()
+                    ctx.beginPath()
                     for (let i = 0; i < 6; i++) {
                         const a = (Math.PI / 180) * (60 * i - 30)
-                        i === 0
-                            ? ctx!.moveTo(x + size * Math.cos(a), y + size * Math.sin(a))
-                            : ctx!.lineTo(x + size * Math.cos(a), y + size * Math.sin(a))
+                        i === 0 ? ctx.moveTo(x + size * Math.cos(a), y + size * Math.sin(a))
+                            : ctx.lineTo(x + size * Math.cos(a), y + size * Math.sin(a))
                     }
-                    ctx!.closePath()
-                    ctx!.stroke()
+                    ctx.closePath()
+                    ctx.stroke()
                 }
             }
         }
 
-        function drawRoboticFace(mx: number, my: number, t: number) {
-            const W = canvas!.width, H = canvas!.height
-            const cx = W * 0.72
-            const cy = H * 0.48
-            const scale = Math.min(W, H) * 0.3
-            const tiltX = (mx / W - 0.5) * 0.08
-            const tiltY = (my / H - 0.5) * 0.06
-            const c = ctx!
-
-            c.save()
-            c.translate(cx, cy)
-            c.rotate(tiltX)
-            c.translate(-cx, -cy)
-
-            // Glow aura
-            const aura = c.createRadialGradient(cx, cy, 0, cx, cy, scale * 0.9)
-            aura.addColorStop(0, 'rgba(124,58,237,0.08)')
-            aura.addColorStop(1, 'transparent')
-            c.fillStyle = aura
-            c.beginPath()
-            c.arc(cx, cy, scale * 0.9, 0, Math.PI * 2)
-            c.fill()
-
-            // Octagonal head
-            const headPts = [
-                [cx - scale * 0.22, cy - scale * 0.55],
-                [cx + scale * 0.22, cy - scale * 0.55],
-                [cx + scale * 0.4, cy - scale * 0.35],
-                [cx + scale * 0.4, cy + scale * 0.25],
-                [cx + scale * 0.22, cy + scale * 0.52],
-                [cx - scale * 0.22, cy + scale * 0.52],
-                [cx - scale * 0.4, cy + scale * 0.25],
-                [cx - scale * 0.4, cy - scale * 0.35],
-            ].map(([x, y]) => [x! + tiltX * scale * 0.25, y! + tiltY * scale * 0.2])
-
-            c.beginPath()
-            headPts.forEach(([x, y], i) => i === 0 ? c.moveTo(x!, y!) : c.lineTo(x!, y!))
-            c.closePath()
-            c.fillStyle = 'rgba(5,5,5,0.85)'
-            c.fill()
-            c.strokeStyle = 'rgba(124,58,237,0.7)'
-            c.lineWidth = 1
-            c.stroke()
-
-            // Inner frame
-            c.beginPath()
-            headPts.forEach(([x, y], i) => {
-                const ix = cx + (x! - cx) * 0.88
-                const iy = cy + (y! - cy) * 0.88
-                i === 0 ? c.moveTo(ix, iy) : c.lineTo(ix, iy)
-            })
-            c.closePath()
-            c.strokeStyle = 'rgba(124,58,237,0.2)'
-            c.lineWidth = 0.5
-            c.stroke()
-
-            // Face panels
-            const panels = [
-                { x: cx - scale * 0.32, y: cy - scale * 0.52, w: scale * 0.64, h: scale * 0.16, stroke: 'rgba(124,58,237,0.4)', fill: 'rgba(124,58,237,0.06)' },
-                { x: cx - scale * 0.37, y: cy - scale * 0.3, w: scale * 0.16, h: scale * 0.36, stroke: 'rgba(56,189,248,0.3)', fill: 'rgba(56,189,248,0.04)' },
-                { x: cx + scale * 0.21, y: cy - scale * 0.3, w: scale * 0.16, h: scale * 0.36, stroke: 'rgba(56,189,248,0.3)', fill: 'rgba(56,189,248,0.04)' },
-                { x: cx - scale * 0.22, y: cy + scale * 0.3, w: scale * 0.44, h: scale * 0.18, stroke: 'rgba(167,139,250,0.3)', fill: 'rgba(167,139,250,0.05)' },
-            ]
-            panels.forEach(p => {
-                c.beginPath()
-                c.rect(p.x + tiltX * scale * 0.2, p.y + tiltY * scale * 0.15, p.w, p.h)
-                c.fillStyle = p.fill
-                c.fill()
-                c.strokeStyle = p.stroke
-                c.lineWidth = 0.5
-                c.stroke()
-            })
-
-            // Grid lines on face
-            for (let r = 0; r < 10; r++) {
-                for (let col2 = 0; col2 < 8; col2++) {
-                    const px = cx - scale * 0.32 + col2 * scale * 0.09 + tiltX * scale * 0.2
-                    const py = cy - scale * 0.35 + r * scale * 0.088 + tiltY * scale * 0.15
-                    if (col2 < 7) {
-                        c.beginPath()
-                        c.moveTo(px, py)
-                        c.lineTo(px + scale * 0.09, py)
-                        c.strokeStyle = 'rgba(124,58,237,0.08)'
-                        c.lineWidth = 0.3
-                        c.stroke()
-                    }
-                    if (r < 9) {
-                        c.beginPath()
-                        c.moveTo(px, py)
-                        c.lineTo(px, py + scale * 0.088)
-                        c.strokeStyle = 'rgba(124,58,237,0.08)'
-                        c.lineWidth = 0.3
-                        c.stroke()
-                    }
-                }
+        function drawCenter() {
+            if (!canvas || !ctx) return
+            const W = canvas.width, H = canvas.height
+            const cx = W / 2, cy = H / 2
+            const pulse = Math.sin(hexPulseRef.current) * 0.3 + 0.7
+            for (let i = 3; i >= 1; i--) {
+                ctx.beginPath()
+                ctx.arc(cx, cy, 20 * i * pulse, 0, Math.PI * 2)
+                ctx.strokeStyle = `rgba(124,58,237,${0.15 / i})`
+                ctx.lineWidth = 0.5
+                ctx.stroke()
             }
-
-            // Eyes
-            const eyePulse = Math.sin(t * 0.03) * 0.3 + 0.7
-            const blinkState = Math.sin(t * 0.008) > 0.95
-                ? Math.max(0, 1 - (Math.sin(t * 0.008) - 0.95) * 20)
-                : 1
-            const eyePositions = [
-                { x: cx - scale * 0.2 + tiltX * scale * 0.15, y: cy - scale * 0.14 + tiltY * scale * 0.1 },
-                { x: cx + scale * 0.2 + tiltX * scale * 0.15, y: cy - scale * 0.14 + tiltY * scale * 0.1 },
-            ]
-
-            eyePositions.forEach(eye => {
-                const er = scale * 0.072
-
-                // Glow
-                const eg = c.createRadialGradient(eye.x, eye.y, 0, eye.x, eye.y, er * 2.5)
-                eg.addColorStop(0, `rgba(56,189,248,${0.4 * eyePulse})`)
-                eg.addColorStop(1, 'transparent')
-                c.fillStyle = eg
-                c.beginPath()
-                c.arc(eye.x, eye.y, er * 2.5, 0, Math.PI * 2)
-                c.fill()
-
-                // Hex eye socket
-                c.save()
-                c.translate(eye.x, eye.y)
-                c.beginPath()
-                for (let i = 0; i < 6; i++) {
-                    const a = (Math.PI / 3) * i
-                    i === 0
-                        ? c.moveTo(er * Math.cos(a), er * blinkState * Math.sin(a))
-                        : c.lineTo(er * Math.cos(a), er * blinkState * Math.sin(a))
-                }
-                c.closePath()
-                c.fillStyle = 'rgba(5,5,20,0.95)'
-                c.fill()
-                c.strokeStyle = `rgba(56,189,248,${0.9 * eyePulse})`
-                c.lineWidth = 1
-                c.stroke()
-
-                // Inner ring
-                c.beginPath()
-                for (let i = 0; i < 6; i++) {
-                    const a = (Math.PI / 3) * i + Math.PI / 6
-                    i === 0
-                        ? c.moveTo(er * 0.55 * Math.cos(a), er * 0.55 * blinkState * Math.sin(a))
-                        : c.lineTo(er * 0.55 * Math.cos(a), er * 0.55 * blinkState * Math.sin(a))
-                }
-                c.closePath()
-                c.strokeStyle = `rgba(56,189,248,${0.5 * eyePulse})`
-                c.lineWidth = 0.5
-                c.stroke()
-
-                // Pupil
-                c.beginPath()
-                c.arc(0, 0, er * 0.22, 0, Math.PI * 2)
-                c.fillStyle = `rgba(56,189,248,${eyePulse})`
-                c.fill()
-
-                // Scan line
-                c.beginPath()
-                c.moveTo(-er * 1.2, 0)
-                c.lineTo(er * 1.2, 0)
-                c.strokeStyle = `rgba(56,189,248,${0.5 * eyePulse})`
-                c.lineWidth = 0.5
-                c.stroke()
-
-                c.restore()
-
-                // Circuit lines from eye
-                const dir = eye.x < cx ? -1 : 1
-                c.beginPath()
-                c.moveTo(eye.x + dir * er, eye.y)
-                c.lineTo(eye.x + dir * er * 2.5, eye.y)
-                c.lineTo(eye.x + dir * er * 2.5, eye.y - er * 1.2)
-                c.strokeStyle = `rgba(56,189,248,${0.25 * eyePulse})`
-                c.lineWidth = 0.5
-                c.stroke()
-                c.beginPath()
-                c.arc(eye.x + dir * er * 2.5, eye.y - er * 1.2, 2, 0, Math.PI * 2)
-                c.fillStyle = `rgba(56,189,248,${0.5 * eyePulse})`
-                c.fill()
-            })
-
-            // Nose
-            const noseX = cx + tiltX * scale * 0.15
-            const noseTopY = cy - scale * 0.04 + tiltY * scale * 0.1
-            const noseBotY = cy + scale * 0.18 + tiltY * scale * 0.1
-            c.beginPath()
-            c.moveTo(noseX - scale * 0.04, noseTopY)
-            c.lineTo(noseX, noseTopY - scale * 0.04)
-            c.lineTo(noseX + scale * 0.04, noseTopY)
-            c.lineTo(noseX + scale * 0.04, noseBotY)
-            c.lineTo(noseX - scale * 0.04, noseBotY)
-            c.closePath()
-            c.strokeStyle = 'rgba(167,139,250,0.4)'
-            c.lineWidth = 0.5
-            c.stroke()
-
-            // Mouth speaker grille
-            const mouthX = cx + tiltX * scale * 0.2
-            const mouthY = cy + scale * 0.3 + tiltY * scale * 0.15
-            const mW = scale * 0.32, mH = scale * 0.06
-            c.beginPath()
-            c.rect(mouthX - mW / 2, mouthY - mH / 2, mW, mH)
-            c.fillStyle = 'rgba(5,5,5,0.9)'
-            c.fill()
-            c.strokeStyle = 'rgba(236,72,153,0.5)'
-            c.lineWidth = 0.5
-            c.stroke()
-            for (let i = 0; i < 6; i++) {
-                const lx = mouthX - mW / 2 + (mW / 7) * (i + 1)
-                c.beginPath()
-                c.moveTo(lx, mouthY - mH / 2 + 2)
-                c.lineTo(lx, mouthY + mH / 2 - 2)
-                c.strokeStyle = `rgba(236,72,153,${0.25 + Math.sin(t * 0.1 + i) * 0.2})`
-                c.lineWidth = 1.5
-                c.stroke()
+            const pts = 6, r = 14
+            ctx.beginPath()
+            for (let i = 0; i < pts; i++) {
+                const a = ((Math.PI * 2) / pts) * i - Math.PI / 2
+                const px = cx + r * Math.cos(a), py = cy + r * Math.sin(a)
+                i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py)
             }
-
-            // Forehead LEDs
-            const foreheadY = cy - scale * 0.46 + tiltY * scale * 0.1
-            for (let i = 0; i < 5; i++) {
-                const lx = cx - scale * 0.16 + i * scale * 0.08 + tiltX * scale * 0.15
-                const on = Math.sin(t * 0.05 + i * 1.2) > 0.3
-                c.beginPath()
-                c.arc(lx, foreheadY, scale * 0.012, 0, Math.PI * 2)
-                c.fillStyle = on ? 'rgba(6,255,165,0.9)' : 'rgba(6,255,165,0.15)'
-                c.fill()
-            }
-
-            // Cheek circuit traces
-            ;[[-1, cx - scale * 0.38], [1, cx + scale * 0.38]].forEach(([dir, sx]) => {
-                const ex = (sx as number) + (dir as number) * scale * 0.14
-                c.beginPath()
-                c.moveTo((sx as number) + tiltX * scale * 0.2, cy + tiltY * scale * 0.15)
-                c.lineTo(ex + tiltX * scale * 0.2, cy + tiltY * scale * 0.15)
-                c.lineTo(ex + tiltX * scale * 0.2, cy - scale * 0.1 + tiltY * scale * 0.15)
-                c.strokeStyle = 'rgba(56,189,248,0.25)'
-                c.lineWidth = 0.5
-                c.stroke()
-                c.beginPath()
-                c.arc(ex + tiltX * scale * 0.2, cy - scale * 0.1 + tiltY * scale * 0.15, 2, 0, Math.PI * 2)
-                c.fillStyle = 'rgba(56,189,248,0.5)'
-                c.fill()
-            })
-
-            // Scan line
-            const scanY = cy - scale * 0.55 + ((t * 1.5) % (scale * 1.1))
-            const sg = c.createLinearGradient(cx - scale * 0.42, scanY, cx + scale * 0.42, scanY)
-            sg.addColorStop(0, 'transparent')
-            sg.addColorStop(0.5, 'rgba(6,255,165,0.2)')
-            sg.addColorStop(1, 'transparent')
-            c.fillStyle = sg
-            c.fillRect(cx - scale * 0.42, scanY - 1, scale * 0.84, 2)
-
-            // Left fade
-            const lf = c.createLinearGradient(0, 0, cx - scale * 0.3, 0)
-            lf.addColorStop(0, 'rgba(5,5,5,1)')
-            lf.addColorStop(1, 'transparent')
-            c.fillStyle = lf
-            c.fillRect(0, 0, cx - scale * 0.3, H)
-
-            // Bottom fade
-            const bf = c.createLinearGradient(0, H - scale * 0.5, 0, H)
-            bf.addColorStop(0, 'transparent')
-            bf.addColorStop(1, 'rgba(5,5,5,1)')
-            c.fillStyle = bf
-            c.fillRect(0, H - scale * 0.5, W, scale * 0.5)
-
-            c.restore()
+            ctx.closePath()
+            ctx.fillStyle = 'rgba(124,58,237,0.15)'
+            ctx.fill()
+            ctx.strokeStyle = '#7c3aed'
+            ctx.lineWidth = 1
+            ctx.stroke()
+            ctx.beginPath()
+            ctx.arc(cx, cy, 4, 0, Math.PI * 2)
+            ctx.fillStyle = '#a855f7'
+            ctx.fill()
+            ctx.font = '9px monospace'
+            ctx.fillStyle = 'rgba(200,184,255,0.4)'
+            ctx.textAlign = 'center'
+            ctx.fillText('YOU', cx, cy + 22)
         }
 
-        let t = 0
+        function drawOrbs() {
+            if (!canvas || !ctx) return
+            const W = canvas.width, H = canvas.height
+            orbsRef.current.forEach(o => {
+                o.x += o.vx; o.y += o.vy
+                if (o.x < o.r || o.x > W - o.r) o.vx *= -1
+                if (o.y < o.r || o.y > H - o.r) o.vy *= -1
+                o.pulse += o.pulseSpeed
+                const risk = getRisk(o.event.risk_score)
+                const pulseR = o.r + Math.sin(o.pulse) * 2
+                const isSelected = selectedOrbRef.current?.event.id === o.event.id
+
+                ctx.beginPath()
+                ctx.arc(o.x, o.y, pulseR * 2.5, 0, Math.PI * 2)
+                ctx.fillStyle = `rgba(${risk.glow},${isSelected ? 0.12 : 0.05})`
+                ctx.fill()
+
+                ctx.beginPath()
+                ctx.arc(o.x, o.y, pulseR, 0, Math.PI * 2)
+                ctx.fillStyle = `rgba(${risk.glow},0.25)`
+                ctx.fill()
+
+                ctx.beginPath()
+                ctx.arc(o.x, o.y, pulseR * 0.5, 0, Math.PI * 2)
+                ctx.fillStyle = risk.color
+                ctx.fill()
+
+                if (isSelected) {
+                    ctx.beginPath()
+                    ctx.arc(o.x, o.y, pulseR + 6, 0, Math.PI * 2)
+                    ctx.strokeStyle = risk.color
+                    ctx.lineWidth = 1
+                    ctx.setLineDash([4, 4])
+                    ctx.stroke()
+                    ctx.setLineDash([])
+                }
+
+                ctx.beginPath()
+                ctx.moveTo(W / 2, H / 2)
+                ctx.lineTo(o.x, o.y)
+                ctx.strokeStyle = `rgba(${risk.glow},${isSelected ? 0.15 : 0.04})`
+                ctx.lineWidth = 0.5
+                ctx.setLineDash([3, 6])
+                ctx.stroke()
+                ctx.setLineDash([])
+
+                ctx.font = '9px monospace'
+                ctx.fillStyle = `rgba(${risk.glow},0.7)`
+                ctx.textAlign = 'center'
+                ctx.fillText(o.event.ip, o.x, o.y + pulseR + 12)
+            })
+        }
 
         function animate() {
             if (!canvas || !ctx) return
-            const W = canvas.width
-            const H = canvas.height
-
-            ctx.fillStyle = 'rgba(5,5,5,0.18)'
-            ctx.fillRect(0, 0, W, H)
-
+            ctx.clearRect(0, 0, canvas.width, canvas.height)
             drawHexGrid()
-
-            // Trail
-            trail.push({ x: mouseRef.current.x, y: mouseRef.current.y, a: 0.8 })
-            if (trail.length > 24) trail.shift()
-            trail.forEach((pt, i) => {
-                pt.a *= 0.88
-                ctx.beginPath()
-                ctx.arc(pt.x, pt.y, (i / trail.length) * 6 + 1, 0, Math.PI * 2)
-                ctx.fillStyle = `rgba(124,58,237,${pt.a * 0.5})`
-                ctx.fill()
-            })
-
-            // Ripple
-            const rippleR = (t * 3) % 60
-            ctx.beginPath()
-            ctx.arc(mouseRef.current.x, mouseRef.current.y, rippleR, 0, Math.PI * 2)
-            ctx.strokeStyle = `rgba(124,58,237,${0.3 * (1 - rippleR / 60)})`
-            ctx.lineWidth = 0.5
-            ctx.stroke()
-
-            // Particles
-            particles.forEach((p, i) => {
-                p.x += p.vx; p.y += p.vy
-                if (p.x < 0 || p.x > W) p.vx *= -1
-                if (p.y < 0 || p.y > H) p.vy *= -1
-                const dx = p.x - mouseRef.current.x
-                const dy = p.y - mouseRef.current.y
-                const dist = Math.sqrt(dx * dx + dy * dy)
-                if (dist < 120) { p.vx += (dx / dist) * 0.3; p.vy += (dy / dist) * 0.3 }
-                p.vx *= 0.99; p.vy *= 0.99
-                ctx.beginPath()
-                ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2)
-                ctx.fillStyle = p.color + Math.floor(p.a * 255).toString(16).padStart(2, '0')
-                ctx.fill()
-                for (let j = i + 1; j < particles.length; j++) {
-                    const dx2 = p.x - particles[j].x
-                    const dy2 = p.y - particles[j].y
-                    const d2 = Math.sqrt(dx2 * dx2 + dy2 * dy2)
-                    if (d2 < 80) {
-                        ctx.beginPath()
-                        ctx.moveTo(p.x, p.y)
-                        ctx.lineTo(particles[j].x, particles[j].y)
-                        ctx.strokeStyle = `rgba(124,58,237,${(1 - d2 / 80) * 0.12})`
-                        ctx.lineWidth = 0.3
-                        ctx.stroke()
-                    }
-                }
-            })
-
-            drawRoboticFace(mouseRef.current.x, mouseRef.current.y, t)
-
-            t++
+            drawCenter()
+            drawOrbs()
+            hexPulseRef.current += 0.015
             animRef.current = requestAnimationFrame(animate)
         }
-
         animate()
 
         return () => {
             cancelAnimationFrame(animRef.current)
-            window.removeEventListener('resize', handleResize)
+            window.removeEventListener('resize', resize)
         }
     }, [])
 
-    const parallaxX = typeof window !== 'undefined' ? (mousePos.x / window.innerWidth - 0.5) * 24 : 0
-    const parallaxY = typeof window !== 'undefined' ? (mousePos.y / window.innerHeight - 0.5) * 24 : 0
+    function handleCenterClick(e: React.MouseEvent<HTMLDivElement>) {
+        const rect = e.currentTarget.getBoundingClientRect()
+        const mx = e.clientX - rect.left
+        const my = e.clientY - rect.top
+        let hit: Orb | null = null
+        orbsRef.current.forEach(o => {
+            const dx = o.x - mx, dy = o.y - my
+            if (Math.sqrt(dx * dx + dy * dy) < o.r * 3) hit = o
+        })
+        selectedOrbRef.current = hit
+        setSelected(hit ? (hit as Orb).event : null)
+        forceUpdate(n => n + 1)
+    }
+
+    const risk = selected ? getRisk(selected.risk_score) : null
 
     return (
-        <div style={{ minHeight: '100vh', background: '#050505', color: 'white', fontFamily: 'Inter, sans-serif', overflowX: 'hidden' }}>
+        <>
             <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
-        * { font-family: 'Inter', sans-serif; box-sizing: border-box; margin: 0; padding: 0; }
-        @keyframes fadeUp { from{opacity:0;transform:translateY(40px)} to{opacity:1;transform:translateY(0)} }
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
-        .fade1{animation:fadeUp 0.8s ease 0.1s both}
-        .fade2{animation:fadeUp 0.8s ease 0.25s both}
-        .fade3{animation:fadeUp 0.8s ease 0.4s both}
-        .fade4{animation:fadeUp 0.8s ease 0.55s both}
-        .fade5{animation:fadeUp 0.8s ease 0.7s both}
-        .hcard{transition:all 0.3s ease;cursor:pointer}
-        .hcard:hover{transform:translateY(-6px);background:rgba(124,58,237,0.1)!important;border-color:rgba(124,58,237,0.35)!important}
-        .nav-link{position:relative;transition:color 0.2s;text-decoration:none}
-        .nav-link::after{content:'';position:absolute;bottom:-2px;left:0;width:0;height:1px;background:#a78bfa;transition:width 0.3s}
-        .nav-link:hover{color:#e2e8f0!important}
-        .nav-link:hover::after{width:100%}
-        ::-webkit-scrollbar{width:4px}
-        ::-webkit-scrollbar-track{background:#050505}
-        ::-webkit-scrollbar-thumb{background:#7c3aed40;border-radius:4px}
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #03040a; overflow: hidden; }
+        @keyframes fadeIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+        ::-webkit-scrollbar { width: 3px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #7c3aed30; border-radius: 3px; }
       `}</style>
 
-            <canvas ref={canvasRef} style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none' }} />
+            <div style={{ background: '#03040a', color: '#e2e8f0', fontFamily: 'monospace', height: '100vh', display: 'grid', gridTemplateColumns: '200px 1fr 260px', overflow: 'hidden' }}>
 
-            {/* Nav */}
-            <nav style={{ position: 'fixed', width: '100%', zIndex: 50, padding: '22px 48px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(5,5,5,0.75)', backdropFilter: 'blur(20px)', borderBottom: '0.5px solid rgba(255,255,255,0.04)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <svg width="30" height="30" viewBox="0 0 36 36" fill="none">
-                        <polygon points="18,2 32,10 32,26 18,34 4,26 4,10" fill="#1a0a2e" stroke="#7c3aed" strokeWidth="1.5" />
-                        <polygon points="18,7 28,13 28,23 18,29 8,23 8,13" fill="none" stroke="#a855f7" strokeWidth="0.5" opacity="0.5" />
-                        <path d="M18 11 L22 15 L18 13 L14 15 Z" fill="#c8b8ff" />
-                        <path d="M14 15 L18 13 L22 15 L22 21 L18 25 L14 21 Z" fill="none" stroke="#c8b8ff" strokeWidth="0.8" />
-                        <circle cx="18" cy="18" r="2" fill="#7c3aed" />
-                        <circle cx="18" cy="18" r="1" fill="#c8b8ff" />
-                    </svg>
-                    <span style={{ fontSize: '15px', fontWeight: 700, letterSpacing: '2px', color: '#c8b8ff' }}>DECOYSHIELD</span>
-                </div>
-                <div style={{ display: 'flex', gap: '32px', fontSize: '13px' }}>
-                    {['Platform', 'Honeypots', 'Intelligence', 'Pricing'].map(item => (
-                        <a key={item} href="#" className="nav-link" style={{ color: '#6b7280' }}>{item}</a>
-                    ))}
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#06ffa5', background: 'rgba(6,255,165,0.08)', border: '0.5px solid rgba(6,255,165,0.2)', borderRadius: '20px', padding: '5px 12px' }}>
-                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#06ffa5', display: 'inline-block', animation: 'pulse 1.5s infinite' }} />
-                        LIVE
-                    </div>
-                    <button style={{ padding: '10px 24px', background: 'linear-gradient(135deg, #7c3aed, #a855f7)', border: 'none', borderRadius: '30px', color: 'white', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}
-                        onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
-                        onMouseLeave={e => e.currentTarget.style.opacity = '1'}>
-                        Deploy Now
-                    </button>
-                </div>
-            </nav>
+                {/* LEFT SIDEBAR */}
+                <div style={{ borderRight: '0.5px solid #ffffff08', padding: '16px 14px', display: 'flex', flexDirection: 'column', gap: '16px', background: '#03040a', zIndex: 10 }}>
 
-            {/* Hero */}
-            <main style={{ position: 'relative', zIndex: 10, minHeight: '100vh', display: 'flex', alignItems: 'center', padding: '0 48px', paddingTop: '80px' }}>
-                <div style={{ maxWidth: '560px', transform: `translate(${parallaxX * 0.3}px, ${parallaxY * 0.3}px)`, transition: 'transform 0.1s ease' }}>
-                    <div className="fade1">
-                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: '#a78bfa', letterSpacing: '3px', fontWeight: 600, marginBottom: '28px', background: 'rgba(124,58,237,0.1)', border: '0.5px solid rgba(124,58,237,0.25)', borderRadius: '20px', padding: '6px 14px' }}>
-                            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#a78bfa', display: 'inline-block' }} />
-                            CYBER DECEPTION PLATFORM
+                    {/* Logo + Back */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', paddingBottom: '14px', borderBottom: '0.5px solid #ffffff08' }}>
+                        <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
+                            <polygon points="18,2 32,10 32,26 18,34 4,26 4,10" fill="#1a0a2e" stroke="#7c3aed" strokeWidth="1" />
+                            <polygon points="18,7 28,13 28,23 18,29 8,23 8,13" fill="none" stroke="#a855f7" strokeWidth="0.5" opacity="0.5" />
+                            <path d="M18 11 L22 15 L18 13 L14 15 Z" fill="#c8b8ff" />
+                            <path d="M14 15 L18 13 L22 15 L22 21 L18 25 L14 21 Z" fill="none" stroke="#c8b8ff" strokeWidth="0.8" />
+                            <circle cx="18" cy="18" r="2" fill="#7c3aed" />
+                            <circle cx="18" cy="18" r="1" fill="#c8b8ff" />
+                        </svg>
+                        <div>
+                            <div style={{ fontSize: '11px', fontWeight: 500, color: '#c8b8ff', letterSpacing: '1px' }}>DECOYSHIELD</div>
+                            <div style={{ fontSize: '9px', color: '#ffffff25', letterSpacing: '2px', marginTop: '2px' }}>PREDATOR VIEW</div>
                         </div>
                     </div>
-                    <div className="fade2">
-                        <div style={{ fontSize: '12px', fontWeight: 600, letterSpacing: '4px', color: '#374151', textTransform: 'uppercase', marginBottom: '16px' }}>You are the predator.</div>
-                        <h1 style={{ fontSize: 'clamp(52px, 7vw, 88px)', fontWeight: 900, lineHeight: 0.92, letterSpacing: '-3px', marginBottom: '28px' }}>
-                            <span style={{ background: 'linear-gradient(135deg, #ffffff, #c8b8ff)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>DECOY</span>
-                            <br />
-                            <span style={{ color: 'transparent', WebkitTextStroke: '1px rgba(124,58,237,0.6)' }}>SHIELD</span>
-                        </h1>
+
+                    {/* Back button */}
+                    <button
+                        onClick={() => router.push('/')}
+                        style={{ background: 'rgba(124,58,237,0.08)', border: '0.5px solid rgba(124,58,237,0.2)', borderRadius: '8px', padding: '8px 12px', color: '#a78bfa', fontSize: '11px', cursor: 'pointer', textAlign: 'left', letterSpacing: '1px', transition: 'all 0.2s' }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(124,58,237,0.15)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'rgba(124,58,237,0.08)'}
+                    >
+                        ← Back to Home
+                    </button>
+
+                    {/* Live pill */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#06ffa508', border: '0.5px solid #06ffa520', borderRadius: '20px', padding: '4px 10px', width: 'fit-content' }}>
+                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#06ffa5', display: 'inline-block', animation: 'blink 1.5s infinite' }} />
+                        <span style={{ fontSize: '9px', color: '#06ffa5', letterSpacing: '1px' }}>LIVE</span>
                     </div>
-                    <div className="fade3">
-                        <p style={{ fontSize: '16px', color: '#6b7280', lineHeight: 1.8, marginBottom: '40px', maxWidth: '420px' }}>
-                            Deploy invisible traps. Every attacker that touches a decoy is caught, profiled, and alerted — before they reach anything real.
-                        </p>
-                    </div>
-                    <div className="fade4" style={{ display: 'flex', gap: '14px', alignItems: 'center', marginBottom: '60px' }}>
-                        <button style={{ display: 'flex', alignItems: 'center', gap: '10px', background: 'white', color: 'black', border: 'none', borderRadius: '40px', padding: '16px 32px', fontSize: '14px', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
-                            onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.04)'; e.currentTarget.style.background = '#f0e8ff' }}
-                            onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.background = 'white' }}>
-                            Start Trapping
-                            <span style={{ background: 'black', color: 'white', width: '24px', height: '24px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px' }}>→</span>
-                        </button>
-                        <button style={{ background: 'transparent', border: '0.5px solid rgba(255,255,255,0.12)', borderRadius: '40px', padding: '16px 32px', fontSize: '14px', color: '#9ca3af', cursor: 'pointer', transition: 'all 0.2s' }}
-                            onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(167,139,250,0.5)'; e.currentTarget.style.color = '#e2e8f0' }}
-                            onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)'; e.currentTarget.style.color = '#9ca3af' }}>
-                            View Dashboard
-                        </button>
-                    </div>
-                    <div className="fade5" style={{ display: 'flex', gap: '40px' }}>
+
+                    {/* Stats */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                         {[
-                            { label: 'Threats Caught', value: stats?.total_events ?? 0, color: '#a78bfa' },
-                            { label: 'High Risk', value: stats?.high_risk_events ?? 0, color: '#ff4d6d' },
-                            { label: 'Nations', value: stats?.unique_countries?.length ?? 0, color: '#38bdf8' },
+                            { label: 'EVENTS', value: stats?.total_events ?? 0, color: '#c8b8ff' },
+                            { label: 'HIGH RISK', value: stats?.high_risk_events ?? 0, color: '#ff4d6d' },
+                            { label: 'NATIONS', value: stats?.unique_countries?.length ?? 0, color: '#38bdf8' },
+                            { label: 'TRAPS', value: 3, color: '#4ade80' },
                         ].map(s => (
-                            <div key={s.label}>
-                                <div style={{ fontSize: '36px', fontWeight: 900, color: s.color, lineHeight: 1 }}>{s.value}</div>
-                                <div style={{ fontSize: '10px', color: '#374151', letterSpacing: '1.5px', marginTop: '4px' }}>{s.label.toUpperCase()}</div>
+                            <div key={s.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                                <span style={{ fontSize: '10px', color: '#ffffff25', letterSpacing: '1px' }}>{s.label}</span>
+                                <span style={{ fontSize: '20px', fontWeight: 500, color: s.color }}>{s.value}</span>
                             </div>
                         ))}
                     </div>
-                </div>
-            </main>
 
-            {/* About */}
-            <section style={{ position: 'relative', zIndex: 10, padding: '120px 48px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '80px', alignItems: 'center', background: 'rgba(5,5,5,0.7)', backdropFilter: 'blur(4px)' }}>
-                <div>
-                    <h2 style={{ fontSize: 'clamp(80px, 14vw, 160px)', fontWeight: 900, lineHeight: 0.9, letterSpacing: '-4px', background: 'linear-gradient(180deg, #1a1a2e 0%, transparent 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text', userSelect: 'none' }}>ABOUT</h2>
-                </div>
-                <div>
-                    <div style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '3px', color: '#6b7280', marginBottom: '20px' }}>WHAT IS DECOYSHIELD</div>
-                    <h3 style={{ fontSize: '26px', fontWeight: 700, lineHeight: 1.3, marginBottom: '20px', color: '#e2e8f0' }}>Deception is your strongest defense against attackers who never expect it.</h3>
-                    <p style={{ color: '#4b5563', lineHeight: 1.9, marginBottom: '20px', fontSize: '15px' }}>DecoyShield deploys fake SSH servers, fake admin portals, fake APIs, and fake credentials. When an attacker touches any decoy — we capture everything.</p>
-                    <p style={{ color: '#374151', lineHeight: 1.9, fontSize: '15px', marginBottom: '32px' }}>Nobody should ever touch a honeypot. If they do, it matters. You'll know the moment it happens.</p>
-                    <button style={{ padding: '14px 32px', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: '40px', background: 'transparent', color: '#9ca3af', fontSize: '13px', cursor: 'pointer', transition: 'all 0.2s' }}
-                        onMouseEnter={e => { e.currentTarget.style.background = 'rgba(124,58,237,0.1)'; e.currentTarget.style.borderColor = 'rgba(124,58,237,0.4)'; e.currentTarget.style.color = '#c8b8ff' }}
-                        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'; e.currentTarget.style.color = '#9ca3af' }}>
-                        Learn More →
-                    </button>
-                </div>
-            </section>
+                    {/* Heartbeat */}
+                    <div>
+                        <div style={{ fontSize: '9px', color: '#ffffff20', letterSpacing: '2px', marginBottom: '6px' }}>HEARTBEAT</div>
+                        <canvas ref={hbCanvasRef} width={172} height={36} style={{ width: '100%', height: '36px' }} />
+                    </div>
 
-            {/* Honeypot cards */}
-            <section style={{ position: 'relative', zIndex: 10, padding: '80px 48px 120px', background: 'rgba(5,5,5,0.7)', backdropFilter: 'blur(4px)' }}>
-                <div style={{ marginBottom: '56px' }}>
-                    <div style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '3px', color: '#6b7280', marginBottom: '16px' }}>DECEPTION ARSENAL</div>
-                    <h2 style={{ fontSize: '44px', fontWeight: 900, letterSpacing: '-2px', background: 'linear-gradient(135deg, #fff, #c8b8ff)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>Every trap. Every vector.</h2>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '14px' }}>
-                    {[
-                        { icon: '⬡', title: 'SSH Honeypot', desc: 'Fake server. Captures brute force, commands, and payloads in real time.', color: '#a78bfa', score: 90 },
-                        { icon: '◈', title: 'Web Portal', desc: 'Fake admin login. Captures credential spray and recon behavior.', color: '#38bdf8', score: 70 },
-                        { icon: '◎', title: 'Fake API', desc: 'Decoy REST endpoints. Detects enumeration and fuzzing automatically.', color: '#06ffa5', score: 40 },
-                        { icon: '◆', title: 'Honeytokens', desc: 'Fake AWS keys. If used, a real breach has occurred. Zero false positives.', color: '#ff4d6d', score: 95 },
-                    ].map((h, i) => (
-                        <div key={i} className="hcard" style={{ background: 'rgba(255,255,255,0.025)', border: '0.5px solid rgba(255,255,255,0.07)', borderRadius: '16px', padding: '26px' }}>
-                            <div style={{ fontSize: '26px', marginBottom: '14px', color: h.color }}>{h.icon}</div>
-                            <div style={{ fontSize: '14px', fontWeight: 700, color: '#e2e8f0', marginBottom: '8px' }}>{h.title}</div>
-                            <p style={{ fontSize: '12px', color: '#4b5563', lineHeight: 1.7, marginBottom: '18px' }}>{h.desc}</p>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', marginBottom: '5px' }}>
-                                <span style={{ color: '#374151', letterSpacing: '1px' }}>THREAT SCORE</span>
-                                <span style={{ color: h.color, fontWeight: 700 }}>{h.score}</span>
-                            </div>
-                            <div style={{ height: '3px', background: 'rgba(255,255,255,0.05)', borderRadius: '2px' }}>
-                                <div style={{ width: `${h.score}%`, height: '100%', background: h.color, borderRadius: '2px', opacity: 0.7 }} />
-                            </div>
+                    {/* Feed */}
+                    <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                        <div style={{ fontSize: '9px', color: '#ffffff20', letterSpacing: '2px', marginBottom: '8px' }}>THREAT LOG</div>
+                        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            {events.length === 0 ? (
+                                <div style={{ color: '#ffffff15', fontSize: '10px', animation: 'blink 1.5s infinite' }}>awaiting contact...</div>
+                            ) : events.map(e => {
+                                const r = getRisk(e.risk_score)
+                                return (
+                                    <div
+                                        key={e.id}
+                                        onClick={() => {
+                                            const orb = orbsRef.current.find(o => o.event.id === e.id) || null
+                                            selectedOrbRef.current = orb
+                                            setSelected(e)
+                                        }}
+                                        style={{ paddingLeft: '8px', borderLeft: `2px solid ${r.color}`, cursor: 'pointer', padding: '5px 8px' }}
+                                    >
+                                        <div style={{ fontSize: '11px', color: r.color }}>{e.ip}</div>
+                                        <div style={{ fontSize: '10px', color: '#ffffff30', marginTop: '1px' }}>{e.event_type.replace(/_/g, ' ')} · {timeAgo(e.created_at)}</div>
+                                    </div>
+                                )
+                            })}
                         </div>
-                    ))}
-                </div>
-            </section>
-
-            {/* Process */}
-            <section style={{ position: 'relative', zIndex: 10, padding: '80px 48px 120px', borderTop: '0.5px solid rgba(255,255,255,0.04)', background: 'rgba(5,5,5,0.7)', backdropFilter: 'blur(4px)' }}>
-                <div style={{ marginBottom: '56px' }}>
-                    <div style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '3px', color: '#6b7280', marginBottom: '16px' }}>THE PROCESS</div>
-                    <h2 style={{ fontSize: '44px', fontWeight: 900, letterSpacing: '-2px', color: '#e2e8f0' }}>How it works.</h2>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)' }}>
-                    {[
-                        { num: '01', title: 'Deploy Decoys', desc: 'One-click deployment of fake servers, portals, and APIs across your infrastructure.' },
-                        { num: '02', title: 'Attacker Arrives', desc: 'An attacker probes your network and stumbles into a honeypot.' },
-                        { num: '03', title: 'We Capture', desc: 'IP, location, ISP, commands, payloads — all captured silently.' },
-                        { num: '04', title: 'You Get Alerted', desc: 'Instant Discord alert with an AI-generated threat summary.' },
-                    ].map((s, i) => (
-                        <div key={i} style={{ padding: '28px', borderLeft: i === 0 ? 'none' : '0.5px solid rgba(255,255,255,0.04)' }}>
-                            <div style={{ fontSize: '11px', fontWeight: 700, color: '#7c3aed', letterSpacing: '2px', marginBottom: '16px' }}>{s.num}</div>
-                            <h3 style={{ fontSize: '17px', fontWeight: 700, color: '#e2e8f0', marginBottom: '10px' }}>{s.title}</h3>
-                            <p style={{ fontSize: '13px', color: '#4b5563', lineHeight: 1.8 }}>{s.desc}</p>
-                        </div>
-                    ))}
-                </div>
-            </section>
-
-            {/* CTA */}
-            <section style={{ position: 'relative', zIndex: 10, padding: '100px 48px', textAlign: 'center', borderTop: '0.5px solid rgba(255,255,255,0.04)', background: 'rgba(5,5,5,0.7)', backdropFilter: 'blur(4px)' }}>
-                <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: '500px', height: '250px', background: 'radial-gradient(ellipse, rgba(124,58,237,0.1) 0%, transparent 70%)', pointerEvents: 'none' }} />
-                <div style={{ position: 'relative', zIndex: 10 }}>
-                    <div style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '3px', color: '#6b7280', marginBottom: '20px' }}>START TODAY</div>
-                    <h2 style={{ fontSize: 'clamp(36px, 5vw, 64px)', fontWeight: 900, letterSpacing: '-2px', marginBottom: '20px', lineHeight: 1, background: 'linear-gradient(135deg, #ffffff, #a78bfa, #ec4899)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>
-                        Let attackers walk<br />into your traps.
-                    </h2>
-                    <p style={{ fontSize: '15px', color: '#4b5563', marginBottom: '44px', maxWidth: '380px', margin: '0 auto 44px', lineHeight: 1.7 }}>100% free. No credit card. Real attackers. Real data.</p>
-                    <div style={{ display: 'flex', gap: '14px', justifyContent: 'center' }}>
-                        <button style={{ display: 'flex', alignItems: 'center', gap: '10px', background: 'white', color: 'black', border: 'none', borderRadius: '40px', padding: '18px 40px', fontSize: '15px', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
-                            onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.03)'}
-                            onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}>
-                            Deploy DecoyShield
-                            <span style={{ background: 'black', color: 'white', width: '26px', height: '26px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>→</span>
-                        </button>
-                        <button style={{ background: 'transparent', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: '40px', padding: '18px 40px', fontSize: '15px', color: '#6b7280', cursor: 'pointer', transition: 'all 0.2s' }}
-                            onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(167,139,250,0.4)'; e.currentTarget.style.color = '#c8b8ff' }}
-                            onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'; e.currentTarget.style.color = '#6b7280' }}>
-                            View Live Dashboard
-                        </button>
                     </div>
                 </div>
-            </section>
 
-            {/* Footer */}
-            <footer style={{ position: 'relative', zIndex: 10, padding: '28px 48px', borderTop: '0.5px solid rgba(255,255,255,0.04)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(5,5,5,0.9)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <svg width="22" height="22" viewBox="0 0 36 36" fill="none">
-                        <polygon points="18,2 32,10 32,26 18,34 4,26 4,10" fill="#1a0a2e" stroke="#7c3aed" strokeWidth="1.5" />
-                        <circle cx="18" cy="18" r="4" fill="#7c3aed" />
-                    </svg>
-                    <span style={{ fontSize: '12px', color: '#374151', letterSpacing: '1px' }}>DECOYSHIELD</span>
+                {/* CENTER CANVAS */}
+                <div
+                    ref={centerRef}
+                    onClick={handleCenterClick}
+                    style={{ position: 'relative', cursor: 'crosshair', overflow: 'hidden' }}
+                >
+                    <canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} />
+                    <div style={{ position: 'absolute', bottom: '16px', left: '50%', transform: 'translateX(-50%)', fontSize: '10px', color: '#ffffff15', letterSpacing: '2px', whiteSpace: 'nowrap', pointerEvents: 'none' }}>
+                        CLICK AN ORB TO INVESTIGATE
+                    </div>
                 </div>
-                <div style={{ fontSize: '12px', color: '#1f2937' }}>Fake targets. Real protection.</div>
-                <div style={{ fontSize: '12px', color: '#1f2937' }}>Built by kunal-gangani</div>
-            </footer>
-        </div>
+
+                {/* RIGHT DETAIL */}
+                <div style={{ borderLeft: '0.5px solid #ffffff08', padding: '16px 14px', background: '#03040acc', overflowY: 'auto', zIndex: 10 }}>
+                    {!selected ? (
+                        <div style={{ color: '#ffffff15', fontSize: '11px', textAlign: 'center', paddingTop: '60px', lineHeight: 2 }}>
+                            ◎<br />select a<br />threat orb
+                        </div>
+                    ) : (
+                        <div style={{ animation: 'fadeIn 0.3s ease' }}>
+                            <div style={{ marginBottom: '16px', paddingBottom: '12px', borderBottom: '0.5px solid #ffffff08' }}>
+                                <div style={{ fontSize: '18px', color: '#c8b8ff', fontWeight: 500, marginBottom: '4px', wordBreak: 'break-all' }}>{selected.ip}</div>
+                                <div style={{ fontSize: '11px', color: '#ffffff30', marginBottom: '10px' }}>
+                                    {[selected.country, selected.city].filter(Boolean).join(' · ') || 'Unknown'}
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: `rgba(${risk!.glow},0.08)`, border: `0.5px solid rgba(${risk!.glow},0.2)`, borderRadius: '20px', padding: '3px 10px', width: 'fit-content' }}>
+                                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: risk!.color, display: 'inline-block' }} />
+                                    <span style={{ fontSize: '9px', color: risk!.color, letterSpacing: '1px' }}>{risk!.label}</span>
+                                </div>
+                            </div>
+
+                            {[
+                                ['ISP', selected.isp],
+                                ['HONEYPOT', selected.honeypot_type],
+                                ['EVENT', selected.event_type.replace(/_/g, ' ')],
+                                ['TIME', timeAgo(selected.created_at)],
+                            ].map(([k, v]) => (
+                                <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: '0.5px solid #ffffff06', fontSize: '11px' }}>
+                                    <span style={{ color: '#ffffff25', letterSpacing: '1px' }}>{k}</span>
+                                    <span style={{ color: '#94a3b8', textTransform: 'capitalize' }}>{v || '—'}</span>
+                                </div>
+                            ))}
+
+                            <div style={{ margin: '14px 0' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', marginBottom: '5px' }}>
+                                    <span style={{ color: '#ffffff25', letterSpacing: '1px' }}>THREAT LEVEL</span>
+                                    <span style={{ color: risk!.color }}>{selected.risk_score}/100</span>
+                                </div>
+                                <div style={{ height: '4px', background: '#ffffff08', borderRadius: '2px', overflow: 'hidden' }}>
+                                    <div style={{ width: `${selected.risk_score}%`, height: '100%', background: risk!.color, borderRadius: '2px', transition: 'width 0.8s ease' }} />
+                                </div>
+                            </div>
+
+                            {selected.commands?.length > 0 && (
+                                <div style={{ marginTop: '12px' }}>
+                                    <div style={{ fontSize: '9px', color: '#ffffff20', letterSpacing: '2px', marginBottom: '6px' }}>INTERCEPTED</div>
+                                    {selected.commands.map((c, i) => (
+                                        <div key={i} style={{ fontSize: '11px', color: '#4ade80', marginBottom: '3px' }}>$ {c}</div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {selected.ai_summary && (
+                                <div style={{ marginTop: '14px', padding: '10px', border: '0.5px solid #ffffff08', borderRadius: '6px' }}>
+                                    <div style={{ fontSize: '9px', color: '#ffffff20', letterSpacing: '2px', marginBottom: '6px' }}>AI ANALYSIS</div>
+                                    <div style={{ fontSize: '11px', color: '#ffffff40', lineHeight: 1.8, whiteSpace: 'pre-line' }}>{selected.ai_summary}</div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            </div>
+        </>
     )
 }
