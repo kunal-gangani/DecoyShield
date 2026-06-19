@@ -378,7 +378,7 @@ export default function DecoyShieldLanding() {
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <button
-                onClick={() => { setShowModal(false); router.push('/') }}
+                onClick={() => { setShowModal(false); router.push('/dashboard') }}
                 style={{ width: '100%', padding: '14px', background: 'linear-gradient(135deg, #7c3aed, #a855f7)', border: 'none', borderRadius: '12px', color: 'white', fontSize: '14px', fontWeight: 600, cursor: 'pointer', transition: 'opacity 0.2s' }}
                 onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
                 onMouseLeave={e => e.currentTarget.style.opacity = '1'}
@@ -484,7 +484,7 @@ export default function DecoyShieldLanding() {
               Start Trapping
               <span style={{ background: 'black', color: 'white', width: '24px', height: '24px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px' }}>→</span>
             </button>
-            <button onClick={() => router.push('/')} style={{ background: 'transparent', border: '0.5px solid rgba(255,255,255,0.12)', borderRadius: '40px', padding: '16px 32px', fontSize: '14px', color: '#9ca3af', cursor: 'pointer', transition: 'all 0.2s' }}
+            <button onClick={() => router.push('/dashboard')} style={{ background: 'transparent', border: '0.5px solid rgba(255,255,255,0.12)', borderRadius: '40px', padding: '16px 32px', fontSize: '14px', color: '#9ca3af', cursor: 'pointer', transition: 'all 0.2s' }}
               onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(167,139,250,0.5)'; e.currentTarget.style.color = '#e2e8f0' }}
               onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)'; e.currentTarget.style.color = '#9ca3af' }}>
               View Dashboard
@@ -536,7 +536,7 @@ export default function DecoyShieldLanding() {
             { icon: '◎', title: 'Fake API', desc: 'Decoy REST endpoints. Detects enumeration and fuzzing automatically.', color: '#06ffa5', score: 40 },
             { icon: '◆', title: 'Honeytokens', desc: 'Fake AWS keys. If used, a real breach has occurred. Zero false positives.', color: '#ff4d6d', score: 95 },
           ].map((h, i) => (
-            <div key={i} className="hcard" onClick={() => router.push('/')} style={{ background: 'rgba(255,255,255,0.025)', border: '0.5px solid rgba(255,255,255,0.07)', borderRadius: '16px', padding: '26px' }}>
+            <div key={i} className="hcard" onClick={() => router.push('/dashboard')} style={{ background: 'rgba(255,255,255,0.025)', border: '0.5px solid rgba(255,255,255,0.07)', borderRadius: '16px', padding: '26px' }}>
               <div style={{ fontSize: '26px', marginBottom: '14px', color: h.color }}>{h.icon}</div>
               <div style={{ fontSize: '14px', fontWeight: 700, color: '#e2e8f0', marginBottom: '8px' }}>{h.title}</div>
               <p style={{ fontSize: '12px', color: '#4b5563', lineHeight: 1.7, marginBottom: '18px' }}>{h.desc}</p>
@@ -562,9 +562,9 @@ export default function DecoyShieldLanding() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)' }}>
           {[
             { num: '01', title: 'Deploy Decoys', desc: 'One-click deployment of fake servers, portals, and APIs.', action: () => setShowModal(true), cta: 'Deploy now →' },
-            { num: '02', title: 'Attacker Arrives', desc: 'An attacker probes your network and stumbles into a honeypot.', action: () => router.push('/'), cta: 'See live feed →' },
-            { num: '03', title: 'We Capture', desc: 'IP, location, ISP, commands, payloads — all captured silently.', action: () => router.push('/'), cta: 'View captures →' },
-            { num: '04', title: 'You Get Alerted', desc: 'Instant Discord alert with an AI-generated threat summary.', action: () => router.push('/'), cta: 'See alerts →' },
+            { num: '02', title: 'Attacker Arrives', desc: 'An attacker probes your network and stumbles into a honeypot.', action: () => router.push('/dashboard'), cta: 'See live feed →' },
+            { num: '03', title: 'We Capture', desc: 'IP, location, ISP, commands, payloads — all captured silently.', action: () => router.push('/dashboard'), cta: 'View captures →' },
+            { num: '04', title: 'You Get Alerted', desc: 'Instant Discord alert with an AI-generated threat summary.', action: () => router.push('/dashboard'), cta: 'See alerts →' },
           ].map((s, i) => (
             <div key={i} onClick={s.action} style={{ padding: '28px', borderLeft: i === 0 ? 'none' : '0.5px solid rgba(255,255,255,0.04)', cursor: 'pointer', transition: 'background 0.2s', borderRadius: '8px' }}
               onMouseEnter={e => e.currentTarget.style.background = 'rgba(124,58,237,0.05)'}
@@ -594,7 +594,7 @@ export default function DecoyShieldLanding() {
               Deploy DecoyShield
               <span style={{ background: 'black', color: 'white', width: '26px', height: '26px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>→</span>
             </button>
-            <button onClick={() => router.push('/')} style={{ background: 'transparent', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: '40px', padding: '18px 40px', fontSize: '15px', color: '#6b7280', cursor: 'pointer', transition: 'all 0.2s' }}
+            <button onClick={() => router.push('/dashboard')} style={{ background: 'transparent', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: '40px', padding: '18px 40px', fontSize: '15px', color: '#6b7280', cursor: 'pointer', transition: 'all 0.2s' }}
               onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(167,139,250,0.4)'; e.currentTarget.style.color = '#c8b8ff' }}
               onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'; e.currentTarget.style.color = '#6b7280' }}>
               View Live Dashboard
@@ -614,7 +614,7 @@ export default function DecoyShieldLanding() {
         </div>
         <div style={{ fontSize: '12px', color: '#1f2937' }}>Fake targets. Real protection.</div>
         <div style={{ display: 'flex', gap: '16px', fontSize: '12px' }}>
-          <span onClick={() => router.push('/')} style={{ color: '#374151', cursor: 'pointer', transition: 'color 0.2s' }}
+          <span onClick={() => router.push('/dashboard')} style={{ color: '#374151', cursor: 'pointer', transition: 'color 0.2s' }}
             onMouseEnter={e => e.currentTarget.style.color = '#a78bfa'}
             onMouseLeave={e => e.currentTarget.style.color = '#374151'}>Dashboard</span>
           <a href="https://github.com/kunal-gangani/DecoyShield" target="_blank" rel="noopener noreferrer" style={{ color: '#374151', textDecoration: 'none', transition: 'color 0.2s' }}
