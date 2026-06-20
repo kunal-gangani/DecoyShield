@@ -323,8 +323,10 @@ export default function DecoyShieldLanding() {
         return () => { cancelAnimationFrame(animRef.current); window.removeEventListener('resize', handleResize) }
     }, [])
 
-    const parallaxX = typeof window !== 'undefined' ? (mousePos.x / window.innerWidth - 0.5) * 24 : 0
-    const parallaxY = typeof window !== 'undefined' ? (mousePos.y / window.innerHeight - 0.5) * 24 : 0
+    const [dims, setDims] = useState({ w: 1440, h: 900 })
+    useEffect(() => { setDims({ w: window.innerWidth, h: window.innerHeight }) }, [])
+    const parallaxX = (mousePos.x / dims.w - 0.5) * 24
+    const parallaxY = (mousePos.y / dims.h - 0.5) * 24
 
     return (
         <div style={{ minHeight: '100vh', background: '#050505', color: 'white', fontFamily: 'Inter, sans-serif', overflowX: 'hidden' }}>
