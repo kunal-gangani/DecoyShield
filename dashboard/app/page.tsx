@@ -97,182 +97,196 @@ export default function DecoyShieldLanding() {
             }
         }
 
-        function drawRoboticFace(mx: number, my: number, t: number) {
+        function drawSigil(mx: number, my: number, t: number) {
             const W = canvas!.width, H = canvas!.height
             const cx = W * 0.72
             const cy = H * 0.48
-            const scale = Math.min(W, H) * 0.3
-            const tiltX = (mx / W - 0.5) * 0.08
-            const tiltY = (my / H - 0.5) * 0.06
+            const scale = Math.min(W, H) * 0.26
+            const tiltX = (mx / W - 0.5) * 0.15
+            const tiltY = (my / H - 0.5) * 0.1
             const c = ctx!
 
             c.save()
             c.translate(cx, cy)
-            c.rotate(tiltX)
-            c.translate(-cx, -cy)
 
-            const aura = c.createRadialGradient(cx, cy, 0, cx, cy, scale * 0.9)
-            aura.addColorStop(0, 'rgba(124,58,237,0.08)')
+            // Outer aura
+            const aura = c.createRadialGradient(0, 0, 0, 0, 0, scale * 1.3)
+            aura.addColorStop(0, 'rgba(124,58,237,0.1)')
+            aura.addColorStop(0.6, 'rgba(124,58,237,0.04)')
             aura.addColorStop(1, 'transparent')
             c.fillStyle = aura
             c.beginPath()
-            c.arc(cx, cy, scale * 0.9, 0, Math.PI * 2)
+            c.arc(0, 0, scale * 1.3, 0, Math.PI * 2)
             c.fill()
 
-            const headPts = [
-                [cx - scale * 0.22, cy - scale * 0.55],
-                [cx + scale * 0.22, cy - scale * 0.55],
-                [cx + scale * 0.4, cy - scale * 0.35],
-                [cx + scale * 0.4, cy + scale * 0.25],
-                [cx + scale * 0.22, cy + scale * 0.52],
-                [cx - scale * 0.22, cy + scale * 0.52],
-                [cx - scale * 0.4, cy + scale * 0.25],
-                [cx - scale * 0.4, cy - scale * 0.35],
-            ].map(([x, y]) => [x! + tiltX * scale * 0.25, y! + tiltY * scale * 0.2])
+            // Slow continuous rotation + mouse tilt
+            const rot = t * 0.0025
 
+            // ---- Outer rotating ring of nodes ----
+            c.save()
+            c.rotate(rot + tiltX)
+            const outerNodes = 12
+            for (let i = 0; i < outerNodes; i++) {
+                const a = (i / outerNodes) * Math.PI * 2
+                const r = scale * 1.05
+                const nx = Math.cos(a) * r
+                const ny = Math.sin(a) * r
+                const pulse = Math.sin(t * 0.04 + i) * 0.5 + 0.5
+                c.beginPath()
+                c.arc(nx, ny, 2 + pulse * 1.5, 0, Math.PI * 2)
+                c.fillStyle = `rgba(167,139,250,${0.3 + pulse * 0.4})`
+                c.fill()
+                if (i % 3 === 0) {
+                    c.beginPath()
+                    c.moveTo(nx, ny)
+                    c.lineTo(Math.cos(a) * scale * 0.85, Math.sin(a) * scale * 0.85)
+                    c.strokeStyle = `rgba(167,139,250,${0.15 + pulse * 0.15})`
+                    c.lineWidth = 0.5
+                    c.stroke()
+                }
+            }
             c.beginPath()
-            headPts.forEach(([x, y], i) => i === 0 ? c.moveTo(x!, y!) : c.lineTo(x!, y!))
-            c.closePath()
-            c.fillStyle = 'rgba(5,5,5,0.85)'
-            c.fill()
-            c.strokeStyle = 'rgba(124,58,237,0.7)'
-            c.lineWidth = 1
-            c.stroke()
-
-            c.beginPath()
-            headPts.forEach(([x, y], i) => {
-                const ix = cx + (x! - cx) * 0.88
-                const iy = cy + (y! - cy) * 0.88
-                i === 0 ? c.moveTo(ix, iy) : c.lineTo(ix, iy)
-            })
-            c.closePath()
-            c.strokeStyle = 'rgba(124,58,237,0.2)'
+            c.arc(0, 0, scale * 1.05, 0, Math.PI * 2)
+            c.strokeStyle = 'rgba(124,58,237,0.15)'
             c.lineWidth = 0.5
             c.stroke()
+            c.restore()
 
-            const panels = [
-                { x: cx - scale * 0.32, y: cy - scale * 0.52, w: scale * 0.64, h: scale * 0.16, stroke: 'rgba(124,58,237,0.4)', fill: 'rgba(124,58,237,0.06)' },
-                { x: cx - scale * 0.37, y: cy - scale * 0.3, w: scale * 0.16, h: scale * 0.36, stroke: 'rgba(56,189,248,0.3)', fill: 'rgba(56,189,248,0.04)' },
-                { x: cx + scale * 0.21, y: cy - scale * 0.3, w: scale * 0.16, h: scale * 0.36, stroke: 'rgba(56,189,248,0.3)', fill: 'rgba(56,189,248,0.04)' },
-                { x: cx - scale * 0.22, y: cy + scale * 0.3, w: scale * 0.44, h: scale * 0.18, stroke: 'rgba(167,139,250,0.3)', fill: 'rgba(167,139,250,0.05)' },
-            ]
-            panels.forEach(p => {
+            // ---- Mid ring — dashed, counter-rotating ----
+            c.save()
+            c.rotate(-rot * 1.4 + tiltY)
+            c.beginPath()
+            c.arc(0, 0, scale * 0.82, 0, Math.PI * 2)
+            c.strokeStyle = 'rgba(56,189,248,0.25)'
+            c.lineWidth = 0.6
+            c.setLineDash([6, 10])
+            c.stroke()
+            c.setLineDash([])
+            c.restore()
+
+            // ---- Hexagonal core frame (the shield mark, larger) ----
+            c.save()
+            c.rotate(rot * 0.6 + tiltX * 0.5)
+
+            const hexOuter = (r: number) => {
+                const pts: [number, number][] = []
+                for (let i = 0; i < 6; i++) {
+                    const a = (Math.PI / 3) * i - Math.PI / 2
+                    pts.push([Math.cos(a) * r, Math.sin(a) * r])
+                }
+                return pts
+            }
+
+            // outer hex
+            const hexR = scale * 0.58
+            const outerHex = hexOuter(hexR)
+            c.beginPath()
+            outerHex.forEach(([x, y], i) => i === 0 ? c.moveTo(x, y) : c.lineTo(x, y))
+            c.closePath()
+            c.fillStyle = 'rgba(5,5,5,0.7)'
+            c.fill()
+            c.strokeStyle = 'rgba(124,58,237,0.6)'
+            c.lineWidth = 1.2
+            c.stroke()
+
+            // inner hex (slightly rotated, offset)
+            c.save()
+            c.rotate(Math.PI / 6)
+            const innerHex = hexOuter(hexR * 0.62)
+            c.beginPath()
+            innerHex.forEach(([x, y], i) => i === 0 ? c.moveTo(x, y) : c.lineTo(x, y))
+            c.closePath()
+            c.strokeStyle = 'rgba(167,139,250,0.4)'
+            c.lineWidth = 0.6
+            c.stroke()
+            c.restore()
+
+            // connecting spokes outer -> inner vertices
+            outerHex.forEach(([x, y]) => {
                 c.beginPath()
-                c.rect(p.x + tiltX * scale * 0.2, p.y + tiltY * scale * 0.15, p.w, p.h)
-                c.fillStyle = p.fill
-                c.fill()
-                c.strokeStyle = p.stroke
-                c.lineWidth = 0.5
+                c.moveTo(0, 0)
+                c.lineTo(x, y)
+                c.strokeStyle = 'rgba(124,58,237,0.12)'
+                c.lineWidth = 0.4
                 c.stroke()
             })
 
-            for (let r = 0; r < 10; r++) {
-                for (let col2 = 0; col2 < 8; col2++) {
-                    const px = cx - scale * 0.32 + col2 * scale * 0.09 + tiltX * scale * 0.2
-                    const py = cy - scale * 0.35 + r * scale * 0.088 + tiltY * scale * 0.15
-                    if (col2 < 7) {
-                        c.beginPath(); c.moveTo(px, py); c.lineTo(px + scale * 0.09, py)
-                        c.strokeStyle = 'rgba(124,58,237,0.08)'; c.lineWidth = 0.3; c.stroke()
-                    }
-                    if (r < 9) {
-                        c.beginPath(); c.moveTo(px, py); c.lineTo(px, py + scale * 0.088)
-                        c.strokeStyle = 'rgba(124,58,237,0.08)'; c.lineWidth = 0.3; c.stroke()
-                    }
-                }
-            }
+            c.restore()
 
-            const eyePulse = Math.sin(t * 0.03) * 0.3 + 0.7
-            const blinkState = Math.sin(t * 0.008) > 0.95 ? Math.max(0, 1 - (Math.sin(t * 0.008) - 0.95) * 20) : 1
-            const eyePositions = [
-                { x: cx - scale * 0.2 + tiltX * scale * 0.15, y: cy - scale * 0.14 + tiltY * scale * 0.1 },
-                { x: cx + scale * 0.2 + tiltX * scale * 0.15, y: cy - scale * 0.14 + tiltY * scale * 0.1 },
-            ]
+            // ---- Core glow + pulse ----
+            const corePulse = Math.sin(t * 0.025) * 0.3 + 0.7
+            const coreGlow = c.createRadialGradient(0, 0, 0, 0, 0, scale * 0.22)
+            coreGlow.addColorStop(0, `rgba(168,85,247,${0.5 * corePulse})`)
+            coreGlow.addColorStop(1, 'transparent')
+            c.fillStyle = coreGlow
+            c.beginPath()
+            c.arc(0, 0, scale * 0.22, 0, Math.PI * 2)
+            c.fill()
 
-            eyePositions.forEach(eye => {
-                const er = scale * 0.072
-                const eg = c.createRadialGradient(eye.x, eye.y, 0, eye.x, eye.y, er * 2.5)
-                eg.addColorStop(0, `rgba(56,189,248,${0.4 * eyePulse})`); eg.addColorStop(1, 'transparent')
-                c.fillStyle = eg; c.beginPath(); c.arc(eye.x, eye.y, er * 2.5, 0, Math.PI * 2); c.fill()
+            // Core diamond (echoes the shield's inner mark)
+            c.save()
+            c.rotate(rot * -0.8)
+            const coreR = scale * 0.085
+            c.beginPath()
+            c.moveTo(0, -coreR)
+            c.lineTo(coreR, 0)
+            c.lineTo(0, coreR)
+            c.lineTo(-coreR, 0)
+            c.closePath()
+            c.fillStyle = `rgba(200,184,255,${0.6 + corePulse * 0.3})`
+            c.fill()
+            c.strokeStyle = 'rgba(124,58,237,0.8)'
+            c.lineWidth = 1
+            c.stroke()
+            c.restore()
 
-                c.save(); c.translate(eye.x, eye.y)
-                c.beginPath()
-                for (let i = 0; i < 6; i++) {
-                    const a = (Math.PI / 3) * i
-                    i === 0 ? c.moveTo(er * Math.cos(a), er * blinkState * Math.sin(a)) : c.lineTo(er * Math.cos(a), er * blinkState * Math.sin(a))
-                }
-                c.closePath(); c.fillStyle = 'rgba(5,5,20,0.95)'; c.fill()
-                c.strokeStyle = `rgba(56,189,248,${0.9 * eyePulse})`; c.lineWidth = 1; c.stroke()
+            c.beginPath()
+            c.arc(0, 0, 3, 0, Math.PI * 2)
+            c.fillStyle = '#a855f7'
+            c.fill()
 
-                c.beginPath()
-                for (let i = 0; i < 6; i++) {
-                    const a = (Math.PI / 3) * i + Math.PI / 6
-                    i === 0 ? c.moveTo(er * 0.55 * Math.cos(a), er * 0.55 * blinkState * Math.sin(a)) : c.lineTo(er * 0.55 * Math.cos(a), er * 0.55 * blinkState * Math.sin(a))
-                }
-                c.closePath(); c.strokeStyle = `rgba(56,189,248,${0.5 * eyePulse})`; c.lineWidth = 0.5; c.stroke()
-                c.beginPath(); c.arc(0, 0, er * 0.22, 0, Math.PI * 2); c.fillStyle = `rgba(56,189,248,${eyePulse})`; c.fill()
-                c.beginPath(); c.moveTo(-er * 1.2, 0); c.lineTo(er * 1.2, 0)
-                c.strokeStyle = `rgba(56,189,248,${0.5 * eyePulse})`; c.lineWidth = 0.5; c.stroke()
-                c.restore()
+            // ---- Scan ring sweep ----
+            const sweepA = (t * 0.015) % (Math.PI * 2)
+            c.save()
+            c.rotate(sweepA)
+            const sweepGrad = c.createLinearGradient(0, -scale * 0.95, 0, -scale * 0.5)
+            sweepGrad.addColorStop(0, 'rgba(6,255,165,0.5)')
+            sweepGrad.addColorStop(1, 'transparent')
+            c.strokeStyle = sweepGrad
+            c.lineWidth = 1.5
+            c.beginPath()
+            c.moveTo(0, -scale * 0.5)
+            c.lineTo(0, -scale * 0.95)
+            c.stroke()
+            c.restore()
 
-                const dir = eye.x < cx ? -1 : 1
-                c.beginPath(); c.moveTo(eye.x + dir * er, eye.y); c.lineTo(eye.x + dir * er * 2.5, eye.y); c.lineTo(eye.x + dir * er * 2.5, eye.y - er * 1.2)
-                c.strokeStyle = `rgba(56,189,248,${0.25 * eyePulse})`; c.lineWidth = 0.5; c.stroke()
-                c.beginPath(); c.arc(eye.x + dir * er * 2.5, eye.y - er * 1.2, 2, 0, Math.PI * 2)
-                c.fillStyle = `rgba(56,189,248,${0.5 * eyePulse})`; c.fill()
-            })
-
-            const noseX = cx + tiltX * scale * 0.15
-            const noseTopY = cy - scale * 0.04 + tiltY * scale * 0.1
-            const noseBotY = cy + scale * 0.18 + tiltY * scale * 0.1
-            c.beginPath(); c.moveTo(noseX - scale * 0.04, noseTopY); c.lineTo(noseX, noseTopY - scale * 0.04)
-            c.lineTo(noseX + scale * 0.04, noseTopY); c.lineTo(noseX + scale * 0.04, noseBotY)
-            c.lineTo(noseX - scale * 0.04, noseBotY); c.closePath()
-            c.strokeStyle = 'rgba(167,139,250,0.4)'; c.lineWidth = 0.5; c.stroke()
-
-            const mouthX = cx + tiltX * scale * 0.2
-            const mouthY = cy + scale * 0.3 + tiltY * scale * 0.15
-            const mW = scale * 0.32, mH = scale * 0.06
-            c.beginPath(); c.rect(mouthX - mW / 2, mouthY - mH / 2, mW, mH)
-            c.fillStyle = 'rgba(5,5,5,0.9)'; c.fill(); c.strokeStyle = 'rgba(236,72,153,0.5)'; c.lineWidth = 0.5; c.stroke()
-            for (let i = 0; i < 6; i++) {
-                const lx = mouthX - mW / 2 + (mW / 7) * (i + 1)
-                c.beginPath(); c.moveTo(lx, mouthY - mH / 2 + 2); c.lineTo(lx, mouthY + mH / 2 - 2)
-                c.strokeStyle = `rgba(236,72,153,${0.25 + Math.sin(t * 0.1 + i) * 0.2})`; c.lineWidth = 1.5; c.stroke()
-            }
-
-            const foreheadY = cy - scale * 0.46 + tiltY * scale * 0.1
+            // ---- Status ticks around the very outer edge ----
             for (let i = 0; i < 5; i++) {
-                const lx = cx - scale * 0.16 + i * scale * 0.08 + tiltX * scale * 0.15
-                const on = Math.sin(t * 0.05 + i * 1.2) > 0.3
-                c.beginPath(); c.arc(lx, foreheadY, scale * 0.012, 0, Math.PI * 2)
-                c.fillStyle = on ? 'rgba(6,255,165,0.9)' : 'rgba(6,255,165,0.15)'; c.fill()
-            }
-
-            ;[[-1, cx - scale * 0.38], [1, cx + scale * 0.38]].forEach(([dir, sx]) => {
-                const ex = (sx as number) + (dir as number) * scale * 0.14
+                const a = (i / 5) * Math.PI * 2 + rot * 2
+                const on = Math.sin(t * 0.05 + i * 1.3) > 0.2
+                const tx = Math.cos(a) * scale * 1.18
+                const ty = Math.sin(a) * scale * 1.18
                 c.beginPath()
-                c.moveTo((sx as number) + tiltX * scale * 0.2, cy + tiltY * scale * 0.15)
-                c.lineTo(ex + tiltX * scale * 0.2, cy + tiltY * scale * 0.15)
-                c.lineTo(ex + tiltX * scale * 0.2, cy - scale * 0.1 + tiltY * scale * 0.15)
-                c.strokeStyle = 'rgba(56,189,248,0.25)'; c.lineWidth = 0.5; c.stroke()
-                c.beginPath(); c.arc(ex + tiltX * scale * 0.2, cy - scale * 0.1 + tiltY * scale * 0.15, 2, 0, Math.PI * 2)
-                c.fillStyle = 'rgba(56,189,248,0.5)'; c.fill()
-            })
-
-            const scanY = cy - scale * 0.55 + ((t * 1.5) % (scale * 1.1))
-            const sg = c.createLinearGradient(cx - scale * 0.42, scanY, cx + scale * 0.42, scanY)
-            sg.addColorStop(0, 'transparent'); sg.addColorStop(0.5, 'rgba(6,255,165,0.2)'); sg.addColorStop(1, 'transparent')
-            c.fillStyle = sg; c.fillRect(cx - scale * 0.42, scanY - 1, scale * 0.84, 2)
-
-            const lf = c.createLinearGradient(0, 0, cx - scale * 0.3, 0)
-            lf.addColorStop(0, 'rgba(5,5,5,1)'); lf.addColorStop(1, 'transparent')
-            c.fillStyle = lf; c.fillRect(0, 0, cx - scale * 0.3, H)
-
-            const bf = c.createLinearGradient(0, H - scale * 0.5, 0, H)
-            bf.addColorStop(0, 'transparent'); bf.addColorStop(1, 'rgba(5,5,5,1)')
-            c.fillStyle = bf; c.fillRect(0, H - scale * 0.5, W, scale * 0.5)
+                c.arc(tx, ty, 1.8, 0, Math.PI * 2)
+                c.fillStyle = on ? 'rgba(6,255,165,0.85)' : 'rgba(6,255,165,0.15)'
+                c.fill()
+            }
 
             c.restore()
+
+            // Left fade — blend into page
+            const lf = c.createLinearGradient(0, 0, cx - scale * 1.0, 0)
+            lf.addColorStop(0, 'rgba(5,5,5,1)')
+            lf.addColorStop(1, 'transparent')
+            ctx!.fillStyle = lf
+            ctx!.fillRect(0, 0, cx - scale * 1.0, H)
+
+            // Bottom fade
+            const bf = ctx!.createLinearGradient(0, H - scale * 0.7, 0, H)
+            bf.addColorStop(0, 'transparent')
+            bf.addColorStop(1, 'rgba(5,5,5,1)')
+            ctx!.fillStyle = bf
+            ctx!.fillRect(0, H - scale * 0.7, W, scale * 0.7)
         }
 
         let t = 0
@@ -314,7 +328,7 @@ export default function DecoyShieldLanding() {
                 }
             })
 
-            drawRoboticFace(mouseRef.current.x, mouseRef.current.y, t)
+            drawSigil(mouseRef.current.x, mouseRef.current.y, t)
             t++
             animRef.current = requestAnimationFrame(animate)
         }

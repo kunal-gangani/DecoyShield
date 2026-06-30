@@ -1,4 +1,3 @@
-from fastapi import APIRouter
 from models.event import EventCreate
 from services.geo import get_geo
 from services.scoring import calculate_score
@@ -6,6 +5,11 @@ from services.alerts import send_discord_alert
 from services.ai_summary import generate_summary
 import os
 from supabase import create_client
+from fastapi import APIRouter, Request
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
+limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter()
 
@@ -13,7 +17,8 @@ def get_supabase():
     return create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_SERVICE_KEY"))
 
 @router.post("/")
-async def create_event(event: EventCreate):
+@limiter.limit("30/minute")
+async def create_event(request: Request, event: EventCreate):
     supabase = get_supabase()
 
     geo = await get_geo(event.ip)
