@@ -39,7 +39,7 @@ FAKE_USERS = [
 FAKE_KEYS = {
     "aws_access_key": "AKIAFAKE1234567890XX",
     "aws_secret": "fAkeS3cr3tKeyD0N0tUseThis1234567890",
-    "stripe_key": "sk_live_FAKE51HxxxxxxxxxxxxxxxxxxFAKE",
+    "stripe_key": "sk_live_REDACTED_HONEYPOT_BAIT_NOT_REAL",
 }
 
 
